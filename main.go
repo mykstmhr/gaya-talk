@@ -506,7 +506,13 @@ func playSound(name string) {
 	if _, err := os.Stat(path); err != nil {
 		return
 	}
-	_ = exec.Command("afplay", path).Start()
+	cmd := exec.Command("afplay", path)
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	// 終了を待たないと afplay がゾンビプロセスとして溜まり続ける(常駐で発話のたびに発生)。
+	// 再生完了は待たない(待つのは OS によるプロセス回収のためだけ)ので別 goroutine に逃がす。
+	go func() { _ = cmd.Wait() }()
 }
 
 // pttLoop は push-to-talk:押している間だけ録音し、離したら 1 回出力する。

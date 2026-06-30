@@ -201,7 +201,9 @@ func (e *Enhancer) Check(ctx context.Context) error {
 		return err
 	}
 	for _, m := range out.Models {
-		if m.Name == e.cfg.Model || strings.HasPrefix(m.Name, e.cfg.Model+":") || strings.HasPrefix(m.Name, e.cfg.Model) {
+		// 完全一致、またはタグ省略指定(例 "qwen2.5" → "qwen2.5:7b")を許容する。
+		// 素の HasPrefix だと "qwen2.5" が "qwen2.5-coder:7b" のような別モデルにも誤って一致するため避ける。
+		if m.Name == e.cfg.Model || strings.HasPrefix(m.Name, e.cfg.Model+":") {
 			return nil
 		}
 	}

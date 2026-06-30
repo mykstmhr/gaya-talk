@@ -1,4 +1,4 @@
-.PHONY: build run tidy clean app app-open model enhance-model restart
+.PHONY: build run tidy clean setup app app-open model enhance-model restart
 
 # cgo の -lobjc 重複によるリンカ警告(無害)を抑止する。
 LDFLAGS := -ldflags=-extldflags=-Wl,-no_warn_duplicate_libraries
@@ -10,13 +10,23 @@ MODEL_DIR := $(HOME)/.config/ura-talk/models
 MODEL := ggml-large-v3-turbo.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL)
 
-# 整形(enhance)用の設定ファイル。enhance-model がここの model を書き換える。
-ENHANCE_CONFIG := $(HOME)/.config/ura-talk/config.json
+# 設定ファイルの置き場(.app はここを読む)。setup が配置し、enhance-model が model を書き換える。
+CONFIG := $(HOME)/.config/ura-talk/config.json
 
 # 署名ID。既定は安定した自己署名証明書 ura-talk-dev。
 # これで署名すると再ビルドしてもアクセシビリティ等の権限が失効しない。
 # 証明書がキーチェーンに無ければ自動でアドホック(-)にフォールバックする。
 SIGN_IDENTITY ?= ura-talk-dev
+
+# 初回セットアップ: config を配置し、whisper モデルを取得する(make app の前に一度だけ)。
+setup: model
+	@mkdir -p $(dir $(CONFIG))
+	@if [ -f "$(CONFIG)" ]; then \
+	  echo "既にあります(上書きしません): $(CONFIG)"; \
+	else \
+	  cp config.example.json "$(CONFIG)"; \
+	  echo "配置しました: $(CONFIG)(必要に応じ編集)"; \
+	fi
 
 build:
 	go build $(LDFLAGS) -o bin/ura-talk .
@@ -78,11 +88,11 @@ enhance-model:
 	esac; \
 	echo "→ $$m をダウンロードします"; \
 	ollama pull "$$m" || { echo "pull に失敗。Ollama が起動しているか確認してください(ollama serve / Ollama.app)"; exit 1; }; \
-	if [ -f "$(ENHANCE_CONFIG)" ]; then \
-	  sed -i '' "s/\"model\": *\"[^\"]*\"/\"model\": \"$$m\"/" "$(ENHANCE_CONFIG)"; \
-	  echo "✅ enhance.model を $$m に更新: $(ENHANCE_CONFIG)"; \
+	if [ -f "$(CONFIG)" ]; then \
+	  sed -i '' "s/\"model\": *\"[^\"]*\"/\"model\": \"$$m\"/" "$(CONFIG)"; \
+	  echo "✅ enhance.model を $$m に更新: $(CONFIG)"; \
 	else \
-	  echo "⚠️ $(ENHANCE_CONFIG) が無いので enhance.model は手動設定してください(値: $$m)"; \
+	  echo "⚠️ $(CONFIG) が無いので enhance.model は手動設定してください(値: $$m)"; \
 	fi; \
 	echo "反映するには: make restart"
 

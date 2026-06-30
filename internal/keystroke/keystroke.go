@@ -50,6 +50,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -70,11 +71,19 @@ func PromptAccessibility() bool {
 	return C.promptTrust() != 0
 }
 
+// injectMu はクリップボード退避→上書き→Cmd+V→復元の一連を直列化する。
+// 発話ごとに handle が並行起動されるため(特に VAD)、同時実行でクリップボードが
+// 交錯して誤テキストの貼り付けや復元失敗が起きるのを防ぐ。
+var injectMu sync.Mutex
+
 // Inject はフォーカス中のフィールドへ text を貼り付ける。autoEnter が true なら続けて Enter を送る。
 func Inject(text string, autoEnter bool) error {
 	if text == "" {
 		return nil
 	}
+	injectMu.Lock()
+	defer injectMu.Unlock()
+
 	prev, prevErr := readClipboard() // 退避(失敗しても続行)
 	if err := writeClipboard([]byte(text)); err != nil {
 		return fmt.Errorf("クリップボード設定失敗: %w", err)
