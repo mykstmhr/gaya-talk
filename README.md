@@ -57,10 +57,29 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 `output` で投げ先を切り替える。戻すときは値を変えるだけ(Slack 設定は残せる)。
 
-- **`keystroke`**: いまフォーカス中のフィールドへクリップボード経由(Cmd+V)で入力。Slack 以外の Discord・ブラウザ・任意のチャット UI でも使え、`login` 不要。`keystroke.auto_enter: true` で貼り付け後に Enter 送信。要アクセシビリティ権限。
+- **`keystroke`**: いまフォーカス中のフィールドへクリップボード経由(Cmd+V)で入力。Slack 以外の Discord・ブラウザ・任意のチャット UI でも使え、`login` 不要。`keystroke.auto_enter: true` で貼り付け後に Enter 送信(アプリ別に上書き可、後述)。要アクセシビリティ権限。
 - **`slack`**: `chat.postMessage` で自分名義投稿。フォーカス不要(裏で送れる)。`login` で取得した user token を使う。
 
-> **keystroke で意図しない所に入る**: 貼り付けは「発話終了時点で最前面のアプリ」に入る。入力したいチャット欄にフォーカスを当ててから喋ること。何も貼り付かない場合はアクセシビリティ権限が無い(`→ keystroke: …` はログに出るのに貼り付かない、が典型)。
+> **keystroke で意図しない所に入る**: 既定では貼り付けは「発話終了時点で最前面のアプリ」に入る。入力したいチャット欄にフォーカスを当ててから喋ること。何も貼り付かない場合はアクセシビリティ権限が無い(`→ keystroke: …` はログに出るのに貼り付かない、が典型)。
+
+> **ターゲットを固定して誤爆を防ぐ(`keystroke.pin_target: true`)**: リッスン/録音を**開始した時点で最前面だったアプリ**を「ターゲット」として覚え、**そのアプリが前面のときだけ**貼り付ける。別アプリを前面にしている間は貼り付けを**スキップ**(ログに `⏸ 固定先「…」が前面にない…` が出る)。会議中に席を外して別アプリを触っても、意図しない場所に貼られない安全弁。メニューバーに `🎯アプリ名` が出るのでターゲット中だと分かる。
+>
+> 既定(`false`)は従来どおり「発話終了時点で最前面のアプリ」へ貼り付ける(アプリ問わずアクティブな入力欄に入る)。ターゲットを変えるには一度リッスンを停止し、入れたい欄にフォーカスしてから再開する。
+>
+> ※ 「裏に回ったアプリへ無理やり入力する」ことは macOS の制約(バックグラウンドアプリは前面でないと合成貼り付けを受け付けない)上できないため、固定モードは "ターゲット以外には入れない安全弁" として動く。
+
+> **送信キーをアプリ別に変える(`keystroke.send_key` / `overrides`)**: 貼り付け後に送る「送信キー」はアプリによって作法が違う(チャットは `Enter` 送信、別アプリは `Cmd+Enter`、ドキュメントは `Enter` で改行、等)。`send_key` で指定する。値は `none`(貼るだけ) / `enter` / `shift+enter` / `cmd+enter`。
+> ```json
+> "keystroke": {
+>   "send_key": "none",
+>   "overrides": [
+>     { "app": "Slack", "send_key": "enter" },               // Enter で送信
+>     { "app": "com.google.Chrome", "send_key": "cmd+enter" },// このアプリは Cmd+Enter で送信(bundle id 指定)
+>     { "app": "Notion", "send_key": "enter" }                // ドキュメントは Enter=改行
+>   ]
+> }
+> ```
+> 解決の優先順は **一致する override の `send_key` → 全体の `send_key` → `auto_enter`(後方互換: `true`=`enter` / `false`=`none`)**。`app` は**メニューバーに出る 🎯 の表示名**(例 `Slack`)か **bundle id**(例 `com.google.Chrome`)で、大文字小文字は無視・完全一致。bundle id は `osascript -e 'id of app "Slack"'` で調べられる。固定モードでなくても(前面アプリ判定で)効く。`auto_enter` だけ書けば従来どおり(`true`=毎回 Enter)。
 
 ### 入力方式: PTT と VAD
 
@@ -153,7 +172,10 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | キー | 説明 | 既定 |
 |---|---|---|
 | `output` | 出力先。`slack`(自分名義で投稿) / `keystroke`(フォーカス中のUIへ入力) | `slack` |
-| `keystroke.auto_enter` | keystroke 出力時、貼り付け後に Enter を送って送信するか | `false` |
+| `keystroke.auto_enter` | 貼り付け後に Enter を送るか(後方互換。`send_key` 未指定時の既定: `true`=`enter` / `false`=`none`) | `false` |
+| `keystroke.send_key` | 貼り付け後に送る送信キーの既定。`none` / `enter` / `shift+enter` / `cmd+enter`(空なら `auto_enter` を使用) | `""` |
+| `keystroke.pin_target` | リッスン開始時に最前面だったアプリを固定し、**そのアプリが前面のときだけ**貼り付ける(別アプリ前面時はスキップ=誤爆防止)。`false` は従来どおり最前面へ貼り付け | `false` |
+| `keystroke.overrides` | アプリ別の送信キー上書き。`[{ "app": "Slack", "send_key": "enter" }]` の形。`app` は 🎯 表示名か bundle id(大文字小文字無視・完全一致) | `[]` |
 | `slack_client_id` | Slack アプリの Client ID | (slack 出力の login に必須) |
 | `slack_client_secret` | Slack アプリの Client Secret | (login に必須) |
 | `slack_channel` | 投稿先チャンネル ID / 名前 | (投稿に必須) |

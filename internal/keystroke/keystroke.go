@@ -8,8 +8,12 @@
 package keystroke
 
 /*
-#cgo LDFLAGS: -framework ApplicationServices -framework CoreGraphics -framework CoreFoundation
+#cgo CFLAGS: -x objective-c
+#cgo LDFLAGS: -framework ApplicationServices -framework CoreGraphics -framework CoreFoundation -framework AppKit
 #include <ApplicationServices/ApplicationServices.h>
+#import <AppKit/AppKit.h>
+#include <stdlib.h>
+#include <string.h>
 
 // isTrusted はこのプロセスにアクセシビリティ権限があるか(=キーイベントを送れるか)を返す。
 static int isTrusted() {
@@ -28,19 +32,41 @@ static int promptTrust() {
     return t ? 1 : 0;
 }
 
-static void sendKey(CGKeyCode key, int withCmd) {
+// sendKey は key を flags(修飾キーのマスク)付きで合成送出する。flags=0 なら修飾なし。
+static void sendKey(CGKeyCode key, CGEventFlags flags) {
     CGEventSourceRef src = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
     CGEventRef down = CGEventCreateKeyboardEvent(src, key, true);
     CGEventRef up   = CGEventCreateKeyboardEvent(src, key, false);
-    if (withCmd) {
-        CGEventSetFlags(down, kCGEventFlagMaskCommand);
-        CGEventSetFlags(up,   kCGEventFlagMaskCommand);
+    if (flags) {
+        CGEventSetFlags(down, flags);
+        CGEventSetFlags(up,   flags);
     }
     CGEventPost(kCGHIDEventTap, down);
     CGEventPost(kCGHIDEventTap, up);
     CFRelease(down);
     CFRelease(up);
     if (src) CFRelease(src);
+}
+
+// frontmostPID は今アクティブ(最前面)なアプリの PID を返す。取れなければ 0。
+static pid_t frontmostPID() {
+    NSRunningApplication *app = [[NSWorkspace sharedWorkspace] frontmostApplication];
+    if (app == nil) return 0;
+    return app.processIdentifier;
+}
+
+// appName は pid のアプリ表示名を返す(呼び出し側が free する)。取れなければ NULL。
+static char* appName(pid_t pid) {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (app == nil || app.localizedName == nil) return NULL;
+    return strdup([app.localizedName UTF8String]);
+}
+
+// appBundleID は pid のアプリの bundle id を返す(呼び出し側が free する)。取れなければ NULL。
+static char* appBundleID(pid_t pid) {
+    NSRunningApplication *app = [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
+    if (app == nil || app.bundleIdentifier == nil) return NULL;
+    return strdup([app.bundleIdentifier UTF8String]);
 }
 */
 import "C"
@@ -52,6 +78,7 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 // macOS の仮想キーコード。
@@ -71,13 +98,55 @@ func PromptAccessibility() bool {
 	return C.promptTrust() != 0
 }
 
+// Target は貼り付け先のアプリ。PID<=0 は「未取得」を表す。
+type Target struct {
+	PID      int
+	Name     string // アプリ表示名(ログ・メニュー表示・override 照合用)
+	BundleID string // bundle id(override 照合用)
+}
+
+// CaptureFrontmost は今最前面のアプリを取得する。
+// グローバルホットキーで呼ばれる前提なので、ユーザーがフォーカスしていたチャット欄のアプリが取れる。
+func CaptureFrontmost() Target {
+	pid := int(C.frontmostPID())
+	if pid <= 0 {
+		return Target{}
+	}
+	t := Target{PID: pid}
+	if c := C.appName(C.pid_t(pid)); c != nil {
+		t.Name = C.GoString(c)
+		C.free(unsafe.Pointer(c))
+	}
+	if c := C.appBundleID(C.pid_t(pid)); c != nil {
+		t.BundleID = C.GoString(c)
+		C.free(unsafe.Pointer(c))
+	}
+	return t
+}
+
 // injectMu はクリップボード退避→上書き→Cmd+V→復元の一連を直列化する。
 // 発話ごとに handle が並行起動されるため(特に VAD)、同時実行でクリップボードが
 // 交錯して誤テキストの貼り付けや復元失敗が起きるのを防ぐ。
 var injectMu sync.Mutex
 
-// Inject はフォーカス中のフィールドへ text を貼り付ける。autoEnter が true なら続けて Enter を送る。
-func Inject(text string, autoEnter bool) error {
+// postKeyFor は送信キートークン(none|enter|shift+enter|cmd+enter)を、
+// 送出すべきキーと修飾マスクへ変換する。send=false なら何も送らない。
+func postKeyFor(sendKey string) (send bool, key C.CGKeyCode, flags C.CGEventFlags) {
+	switch sendKey {
+	case "enter", "return":
+		return true, C.CGKeyCode(keyReturn), 0
+	case "shift+enter":
+		return true, C.CGKeyCode(keyReturn), C.kCGEventFlagMaskShift
+	case "cmd+enter":
+		return true, C.CGKeyCode(keyReturn), C.kCGEventFlagMaskCommand
+	default: // "none" / "" / 不明
+		return false, 0, 0
+	}
+}
+
+// Inject はフォーカス中のフィールドへ text を貼り付け、sendKey で指定された送信キーを続けて送る。
+// sendKey は none|enter|shift+enter|cmd+enter(none は貼り付けのみ)。
+func Inject(text string, sendKey string) error {
 	if text == "" {
 		return nil
 	}
@@ -88,12 +157,12 @@ func Inject(text string, autoEnter bool) error {
 	if err := writeClipboard([]byte(text)); err != nil {
 		return fmt.Errorf("クリップボード設定失敗: %w", err)
 	}
-	time.Sleep(20 * time.Millisecond) // クリップボード反映待ち
-	C.sendKey(C.CGKeyCode(keyV), 1)   // Cmd+V
+	time.Sleep(20 * time.Millisecond)                       // クリップボード反映待ち
+	C.sendKey(C.CGKeyCode(keyV), C.kCGEventFlagMaskCommand) // Cmd+V
 
-	if autoEnter {
+	if send, key, flags := postKeyFor(sendKey); send {
 		time.Sleep(40 * time.Millisecond)
-		C.sendKey(C.CGKeyCode(keyReturn), 0)
+		C.sendKey(key, flags)
 	}
 
 	// 貼り付け完了を待ってから元のクリップボードへ戻す。

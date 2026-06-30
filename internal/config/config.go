@@ -65,7 +65,69 @@ type Config struct {
 
 // KeystrokeConfig は合成入力(keystroke)出力の設定。
 type KeystrokeConfig struct {
-	AutoEnter bool `json:"auto_enter"` // 貼り付け後に Enter を送って送信するか
+	// AutoEnter は後方互換用。send_key が未指定のときの既定として解釈する(true=enter, false=none)。
+	AutoEnter bool `json:"auto_enter"`
+	// SendKey は貼り付け後に送る「送信キー」の既定: none|enter|shift+enter|cmd+enter。
+	// 空なら AutoEnter にフォールバックする。
+	SendKey   string `json:"send_key"`
+	PinTarget bool   `json:"pin_target"` // リッスン開始時に最前面だったアプリを固定し、そのアプリが前面のときだけ貼り付けるか
+	// Overrides はアプリ別の送信キー上書き。貼り付け先アプリが app に一致すれば
+	// その send_key を使う(Slack は enter で送信、別アプリは cmd+enter、ドキュメントは enter で改行、等)。
+	Overrides []KeystrokeOverride `json:"overrides"`
+}
+
+// KeystrokeOverride はアプリ別の送信キー上書き 1 件。
+type KeystrokeOverride struct {
+	App     string `json:"app"`      // アプリ名(メニューバーの 🎯 表示名)または bundle id。大文字小文字は無視。
+	SendKey string `json:"send_key"` // このアプリでの送信キー: none|enter|shift+enter|cmd+enter
+}
+
+// SendKeyFor は貼り付け先アプリ(表示名 name / bundle id bundleID)に対する送信キーを
+// 正規化して返す(none|enter|shift+enter|cmd+enter)。
+// 優先順: 一致する override の send_key → 既定 send_key → auto_enter(true=enter, false=none)。
+func (k KeystrokeConfig) SendKeyFor(name, bundleID string) string {
+	for _, o := range k.Overrides {
+		if matchApp(o.App, name, bundleID) {
+			if s := normalizeSendKey(o.SendKey); s != "" {
+				return s
+			}
+			break // app は一致したが send_key 未指定 → 既定へフォールバック
+		}
+	}
+	if s := normalizeSendKey(k.SendKey); s != "" {
+		return s
+	}
+	if k.AutoEnter {
+		return "enter"
+	}
+	return "none"
+}
+
+// normalizeSendKey は send_key の表記ゆれを正規トークンへ。未指定/不明は ""(=既定にフォールバック)。
+func normalizeSendKey(s string) string {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "":
+		return ""
+	case "none", "off", "no", "false":
+		return "none"
+	case "enter", "return", "cr", "↵":
+		return "enter"
+	case "shift+enter", "shift+return", "shift-enter", "⇧↵":
+		return "shift+enter"
+	case "cmd+enter", "cmd+return", "command+enter", "meta+enter", "super+enter", "⌘↵":
+		return "cmd+enter"
+	default:
+		return "" // 不明な指定は既定にフォールバック(タイプミスで送信が壊れないように)
+	}
+}
+
+// matchApp は override の app 指定が貼り付け先(表示名 or bundle id)に一致するかを返す(大文字小文字無視の完全一致)。
+func matchApp(pat, name, bundleID string) bool {
+	pat = strings.ToLower(strings.TrimSpace(pat))
+	if pat == "" {
+		return false
+	}
+	return pat == strings.ToLower(name) || pat == strings.ToLower(bundleID)
 }
 
 // EnhanceConfig はローカル LLM(Ollama)による文字起こし整形の設定。

@@ -1,6 +1,14 @@
 {
   "output": "keystroke",
-  "keystroke": { "auto_enter": false },
+  "keystroke": {
+    "auto_enter": false,
+    "send_key": "none",
+    "pin_target": false,
+    "overrides": [
+      { "app": "Slack", "send_key": "enter" },
+      { "app": "com.google.Chrome", "send_key": "cmd+enter" }
+    ]
+  },
   "slack_client_id": "1234567890.1234567890",
   "slack_client_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
   "slack_channel": "C0123456789",

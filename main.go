@@ -201,11 +201,25 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 			log.Println("   一覧で ura-talk をオンにしてから、メニューバーの「終了」→ 再起動してください。")
 			keystroke.PromptAccessibility() // 一覧に正しい署名で自動登録し、システムの許可ダイアログを出す
 		}
-		log.Println("ℹ️ keystroke 出力: 貼り付けは「発話が終わった時点で最前面のアプリ」に入ります。")
-		log.Println("   入力したいチャットの入力欄にフォーカスを当てた状態で喋ってください(ターミナルを前面にしない)。")
+		if cfg.Keystroke.PinTarget {
+			log.Println("ℹ️ keystroke 出力(固定モード): リッスン開始時に最前面だったアプリが前面のときだけ貼り付けます。")
+			log.Println("   別アプリを前面にしている間はスキップします(誤爆防止)。対象を変えるにはリッスンを停止→入れたい欄にフォーカス→再開。")
+		} else {
+			log.Println("ℹ️ keystroke 出力: 貼り付けは「発話が終わった時点で最前面のアプリ」に入ります。")
+			log.Println("   入力したいチャットの入力欄にフォーカスを当てた状態で喋ってください(ターミナルを前面にしない)。")
+		}
 		out.name = "keystroke"
 		out.send = func(_ context.Context, text string) error {
-			return keystroke.Inject(text, cfg.Keystroke.AutoEnter)
+			dest := keystroke.CaptureFrontmost() // 今まさに貼り付く先(=最前面アプリ)
+			if cfg.Keystroke.PinTarget {
+				if t := pinnedSnapshot(); t.PID > 0 && dest.PID != t.PID {
+					log.Printf("⏸ 固定先「%s」が前面にないため貼り付けをスキップしました。", t.Name)
+					return nil
+				}
+			}
+			// 貼り付け先アプリに応じて送信キーを解決(override → 既定 send_key → auto_enter)。
+			sendKey := cfg.Keystroke.SendKeyFor(dest.Name, dest.BundleID)
+			return keystroke.Inject(text, sendKey)
 		}
 		return out
 	case "slack", "":
@@ -231,6 +245,40 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 
 // lockFile は多重起動防止のロックを保持する(プロセス終了まで開いたままにする)。
 var lockFile *os.File
+
+// pinnedTarget は keystroke 固定モードでの貼り付け先アプリ。リッスン/録音の開始時に
+// その時の最前面アプリで更新し、出力 goroutine から参照する(発話処理は並行するため mutex で保護)。
+var (
+	pinMu        sync.Mutex
+	pinnedTarget keystroke.Target
+)
+
+// capturePinTarget はリッスン/録音の開始時に最前面アプリを固定先として記憶し、表示名を返す。
+// 固定モードでない、または取得できなければ空文字を返す(従来どおり最前面へ貼り付ける)。
+func capturePinTarget(cfg *config.Config) string {
+	if cfg.Output != "keystroke" || !cfg.Keystroke.PinTarget {
+		return ""
+	}
+	t := keystroke.CaptureFrontmost()
+	pinMu.Lock()
+	pinnedTarget = t
+	pinMu.Unlock()
+	if t.PID <= 0 {
+		setPinLabel("")
+		log.Println("⚠️ 固定先アプリを取得できませんでした。最前面へ貼り付けます。")
+		return ""
+	}
+	setPinLabel(t.Name)
+	log.Printf("🎯 貼り付け先を「%s」に固定しました。", t.Name)
+	return t.Name
+}
+
+// pinnedSnapshot は現在の固定先アプリを返す(出力 goroutine から安全に読むため)。
+func pinnedSnapshot() keystroke.Target {
+	pinMu.Lock()
+	defer pinMu.Unlock()
+	return pinnedTarget
+}
 
 // mStatus はメニューバーの状態表示メニュー項目。
 var mStatus *systray.MenuItem
@@ -268,9 +316,43 @@ func onReady(dryRun bool) func() {
 	}
 }
 
+// pinLabel はメニューバーのタイトルに常時併記する固定先アプリ名(空なら併記しない)。
+// gate 判定に使う pinnedTarget とは独立した「表示専用」の値。リッスン中だけ出す。
+var (
+	pinLabelMu sync.Mutex
+	pinLabel   string
+)
+
+// setPinLabel はタイトルに併記する固定先名を差し替える(空で消す)。
+func setPinLabel(name string) {
+	pinLabelMu.Lock()
+	pinLabel = name
+	pinLabelMu.Unlock()
+}
+
+// titleWithPin は emoji に固定先(あれば 🎯名前)を併記したメニューバータイトルを作る。
+func titleWithPin(emoji string) string {
+	pinLabelMu.Lock()
+	name := pinLabel
+	pinLabelMu.Unlock()
+	if name == "" {
+		return emoji
+	}
+	return emoji + " 🎯" + truncRunes(name, 16)
+}
+
+// truncRunes は menubar が長くなりすぎないよう name を max 文字に丸める(超過分は …)。
+func truncRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max]) + "…"
+}
+
 // setState はメニューバーのアイコン(emoji)と状態テキストを更新する。
 func setState(emoji, text string) {
-	systray.SetTitle(emoji)
+	systray.SetTitle(titleWithPin(emoji))
 	if mStatus != nil {
 		mStatus.SetTitle(text)
 	}
@@ -515,6 +597,18 @@ func playSound(name string) {
 	go func() { _ = cmd.Wait() }()
 }
 
+// withPin は固定先アプリ名があれば「→ アプリ名」を末尾に足す(メニューバー表示用)。
+func withPin(base, pinned string) string {
+	if pinned == "" {
+		return base
+	}
+	return base + " → 🎯" + pinned
+}
+
+// listenBaseText / recBaseText はリッスン中・録音中の状態テキスト(固定先があれば併記)。
+func listenBaseText(pinned string) string { return withPin("リッスン中(無音待ち)…", pinned) }
+func recBaseText(pinned string) string    { return withPin("● 録音中…", pinned) }
+
 // pttLoop は push-to-talk:押している間だけ録音し、離したら 1 回出力する。
 func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down, up <-chan struct{}) {
 	for {
@@ -523,13 +617,14 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			log.Printf("録音開始失敗: %v", err)
 			continue
 		}
+		pinned := capturePinTarget(cfg)
 		log.Println("● 録音中...")
-		tray.setBase("🔴", "● 録音中…")
+		tray.setBase("🔴", recBaseText(pinned))
 		playOn(cfg)
 
 		<-up
 		pcm, durMs, err := rec.Stop()
-		tray.setBase("🎙", "待機中…")
+		tray.setBase("🎙", "待機中…") // タイトルの 🎯 はそのまま残す
 		playOff(cfg)
 		if err != nil {
 			log.Printf("録音停止失敗: %v", err)
@@ -563,12 +658,15 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		go handle(wh, out, cfg, pcm)
 	})
 
+	// pinned は固定先アプリ名(固定モードのみ)。OnActivity と開始/停止で共有しアイコン表示に出す。
+	var pinned string
+
 	// 発話の検出/終了をアイコンに反映する(リッスン中のみ意味を持つ)。
 	seg.OnActivity = func(active bool) {
 		if active {
-			tray.setBase("🔴", "● 音声検出中…")
+			tray.setBase("🔴", withPin("● 音声検出中…", pinned))
 		} else {
-			tray.setBase("👂", "リッスン中(無音待ち)…")
+			tray.setBase("👂", listenBaseText(pinned))
 		}
 	}
 
@@ -581,15 +679,16 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 				continue
 			}
 			listening = true
+			pinned = capturePinTarget(cfg)
 			log.Println("🎙 リッスン開始(話すと自動で区切って投稿。もう一度キーで停止)")
-			tray.setBase("👂", "リッスン中(無音待ち)…")
+			tray.setBase("👂", listenBaseText(pinned))
 			playOn(cfg)
 		} else {
 			rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
 			seg.Flush()
 			listening = false
 			log.Println("■ リッスン停止")
-			tray.setBase("🎙", "待機中…")
+			tray.setBase("🎙", "待機中…") // タイトルの 🎯 はそのまま残す(次のリッスンで取り直す)
 			playOff(cfg)
 		}
 	}
