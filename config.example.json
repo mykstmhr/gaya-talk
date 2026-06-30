@@ -2,7 +2,7 @@
   "output": "keystroke",
   "keystroke": {
     "auto_enter": false,
-    "send_key": "none",
+    "send_key": "enter",
     "pin_target": false,
     "overrides": [
       { "app": "Slack", "send_key": "enter" },
