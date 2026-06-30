@@ -1,0 +1,10 @@
+# 実設定(Webhook URL などの機密を含む)
+config.json
+
+# ビルド成果物
+/ura-talk
+/bin/
+build/ura-talk.app/
+
+# モデルファイル(大きいのでコミットしない)
+*.bin

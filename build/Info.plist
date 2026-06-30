@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleName</key>
+	<string>ura-talk</string>
+	<key>CFBundleDisplayName</key>
+	<string>ura-talk</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.mykstmhr.uratalk</string>
+	<key>CFBundleExecutable</key>
+	<string>ura-talk</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<!-- Dock アイコンを出さないバックグラウンド(エージェント)アプリにする -->
+	<key>LSUIElement</key>
+	<true/>
+	<!-- マイク使用の理由(TCC の許可ダイアログに表示される。無いと拒否されることがある) -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>相槌やコメントを文字起こしするためにマイクを使用します。</string>
+</dict>
+</plist>

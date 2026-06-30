@@ -1,0 +1,29 @@
+{
+  "output": "keystroke",
+  "keystroke": { "auto_enter": false },
+  "slack_client_id": "1234567890.1234567890",
+  "slack_client_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "slack_channel": "C0123456789",
+  "oauth_redirect_port": 53682,
+  "whisper_bin": "/opt/homebrew/bin/whisper-cli",
+  "whisper_model": "~/.config/ura-talk/models/ggml-large-v3-turbo.bin",
+  "input_device": "MacBook",
+  "language": "ja",
+  "gain": { "enabled": true, "target_peak": 0.95, "max_gain": 12 },
+  "whisper_prompt": "会議での相槌やコメント。なるほど、確かに、それいいですね、賛成です。",
+  "whisper_beam_size": 5,
+  "whisper_no_speech_thold": 0.6,
+  "enhance": { "enabled": false, "backend": "ollama", "endpoint": "http://localhost:11434", "model": "qwen2.5:7b", "prompt": "" },
+  "listen_mode": "vad",
+  "vad": {
+    "threshold": 0.01,
+    "min_speech_ms": 300,
+    "silence_ms": 700,
+    "max_segment_ms": 15000,
+    "preroll_ms": 300
+  },
+  "hotkey": { "mods": [], "key": "rightcmd" },
+  "sound": { "enabled": true, "on": "Submarine", "off": "Bottle" },
+  "min_duration_ms": 300,
+  "message_prefix": "🗣 "
+}
