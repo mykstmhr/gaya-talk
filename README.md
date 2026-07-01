@@ -6,7 +6,7 @@
 
 - **出力先**: `keystroke`(フォーカス先に入力・既定) / `slack`(自分名義で投稿)
 - **入力方式**: `vad`(無音で自動区切り・既定) / `ptt`(押している間だけ録音)
-- 音声処理はローカル完結。メニューバー常駐(`🎙`)。
+- 音声処理はローカル完結。メニューバー常駐(マイクのアイコン。聞き取り中はオレンジ)。設定の一部はメニューバーから切り替え可。
 
 ---
 
@@ -51,7 +51,9 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 ## 使い方
 
-メニューバーのアイコンで状態が分かる: `🎙` 待機 / `👂` リッスン中 / `🔴` 音声検出中 / `💬` 文字起こし中。**「終了」**で停止。
+メニューバーのアイコンで状態が分かる: **マイク(黒)** 待機 / **マイク(オレンジ)** 聞き取り中 / **赤丸の点滅** 音声検出中 / **吹き出し** 文字起こし中。
+
+アイコンをクリックすると開くメニューで、現在の状態と動作情報(`出力` / `方式` / `キー`)を確認できる。keystroke 出力のときは **`入力先を固定`(pin_target)** と **`貼り付け後に送信`(auto_enter)** をその場でトグルできる(左のレ点が ON/OFF。設定ファイルには保存されず、再起動で config の値に戻る)。停止は **「終了」**。
 
 ### 出力先: keystroke と slack
 
@@ -62,9 +64,9 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 > **keystroke で意図しない所に入る**: 既定では貼り付けは「発話終了時点で最前面のアプリ」に入る。入力したいチャット欄にフォーカスを当ててから喋ること。何も貼り付かない場合はアクセシビリティ権限が無い(`→ keystroke: …` はログに出るのに貼り付かない、が典型)。
 
-> **ターゲットを固定して誤爆を防ぐ(`keystroke.pin_target: true`)**: リッスン/録音を**開始した時点で最前面だったアプリ**を「ターゲット」として覚え、**そのアプリが前面のときだけ**貼り付ける。別アプリを前面にしている間は貼り付けを**スキップ**(ログに `⏸ 固定先「…」が前面にない…` が出る)。会議中に席を外して別アプリを触っても、意図しない場所に貼られない安全弁。メニューバーに `🎯アプリ名` が出るのでターゲット中だと分かる。
+> **ターゲットを固定して誤爆を防ぐ(`keystroke.pin_target: true`)**: リッスン/録音を**開始した時点で最前面だったアプリ**を「ターゲット」として覚え、**そのアプリが前面のときだけ**貼り付ける。別アプリを前面にしている間は貼り付けを**スキップ**(ログに `⏸ 固定先「…」が前面にない…` が出る)。会議中に席を外して別アプリを触っても、意図しない場所に貼られない安全弁。ターゲット中はメニューバーにアプリ名が出る(未確定時は `⋯`)。VAD ではさらに、**固定先から前面が外れると自動でリッスンを停止**する(再度キーで再開)。
 >
-> 既定(`false`)は従来どおり「発話終了時点で最前面のアプリ」へ貼り付ける(アプリ問わずアクティブな入力欄に入る)。ターゲットを変えるには一度リッスンを停止し、入れたい欄にフォーカスしてから再開する。
+> 既定(`false`)は従来どおり「発話終了時点で最前面のアプリ」へ貼り付ける(アプリ問わずアクティブな入力欄に入る)。ターゲットを変えるには一度リッスンを停止し、入れたい欄にフォーカスしてから再開する。ON/OFF は config だけでなく**メニューバーからも**切り替えられる。
 >
 > ※ 「裏に回ったアプリへ無理やり入力する」ことは macOS の制約(バックグラウンドアプリは前面でないと合成貼り付けを受け付けない)上できないため、固定モードは "ターゲット以外には入れない安全弁" として動く。
 
@@ -80,7 +82,7 @@ make app-open              # .app をビルドして起動。初回はマイク/
 >   ]
 > }
 > ```
-> 解決順: **`auto_enter: false` → 常に `none`。`true` のときだけ 既定 `enter` → 全体 `send_key` → 一致する override の `send_key`** の順で上書き。`app` は**メニューバーに出る 🎯 の表示名**(例 `Slack`)か **bundle id**(例 `com.google.Chrome`)で、大文字小文字は無視・完全一致。bundle id は `osascript -e 'id of app "Slack"'` で調べられる。固定モードでなくても(前面アプリ判定で)効く。
+> 解決順: **`auto_enter: false` → 常に `none`。`true` のときだけ 既定 `enter` → 全体 `send_key` → 一致する override の `send_key`** の順で上書き。`app` は**貼り付け先アプリの表示名**(例 `Slack`)か **bundle id**(例 `com.google.Chrome`)で、大文字小文字は無視・完全一致。bundle id は `osascript -e 'id of app "Slack"'` で調べられる。固定モードでなくても(前面アプリ判定で)効く。なお `auto_enter` はメニューバーからも ON/OFF できる(そのときの送信キーは `send_key` / `overrides` に従う)。
 
 ### 入力方式: PTT と VAD
 
@@ -128,7 +130,7 @@ make enhance-model
 ```
 
 - `ollama serve` の手動起動は不要(enhance 有効時、起動時に稼働確認し、無ければ自動起動)。
-- 翻訳・加筆を禁止するプロンプトで整形。**失敗時は生テキストをそのまま出力**するので壊れない。整形中はメニューバーが `💬`。
+- 翻訳・加筆を禁止するプロンプトで整形。**失敗時は生テキストをそのまま出力**するので壊れない。整形中はメニューバーが吹き出しアイコンになる。
 - 起動時にモデルをウォームアップ + `keep_alive` で常駐させるのでコールドスタート待ちは出ない。それでも 7B は 1 発話あたり数秒かかる。速さ重視なら `qwen2.5:3b`、不要なら `enabled: false`。
 - 起動ログで使用可否(`✅ 整形(Ollama)有効…` / `⚠️ …使えません`)、発話ごとに `整形 ✏️ "前" → "後"` が出る。
 
@@ -175,11 +177,11 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | キー | 説明 | 既定 |
 |---|---|---|
 | `output` | 出力先。`slack`(自分名義で投稿) / `keystroke`(フォーカス中のUIへ入力) | `slack` |
-| `keystroke.auto_enter` | 貼り付け後にキーを送るかの**最上位スイッチ**。`false` なら何も送らない(`send_key`/`overrides` も無視) | `false` |
+| `keystroke.auto_enter` | 貼り付け後にキーを送るかの**最上位スイッチ**。`false` なら何も送らない(`send_key`/`overrides` も無視)。メニューバーからも ON/OFF 可 | `false` |
 | `keystroke.send_key` | `auto_enter: true` のとき送るキー。`enter` / `shift+enter` / `cmd+enter` / `none`(空なら `enter`) | `""` |
 | `keystroke.send_delay_ms` | 貼り付け(Cmd+V)から送信キーを送るまでの待ち(ms)。Notion/Cosense 等でリスト継続にならないなら `200`〜`300` に上げる。0 で既定(40ms) | `0` |
-| `keystroke.pin_target` | リッスン開始時に最前面だったアプリを固定し、**そのアプリが前面のときだけ**貼り付ける(別アプリ前面時はスキップ=誤爆防止)。`false` は従来どおり最前面へ貼り付け | `false` |
-| `keystroke.overrides` | アプリ別の送信キー上書き。`[{ "app": "Slack", "send_key": "enter" }]` の形。`app` は 🎯 表示名か bundle id(大文字小文字無視・完全一致) | `[]` |
+| `keystroke.pin_target` | リッスン開始時に最前面だったアプリを固定し、**そのアプリが前面のときだけ**貼り付ける(別アプリ前面時はスキップ=誤爆防止)。VAD は固定先から前面が外れると自動でリッスン停止。`false` は従来どおり最前面へ貼り付け。メニューバーからも ON/OFF 可 | `false` |
+| `keystroke.overrides` | アプリ別の送信キー上書き。`[{ "app": "Slack", "send_key": "enter" }]` の形。`app` はアプリ表示名か bundle id(大文字小文字無視・完全一致) | `[]` |
 | `slack_client_id` | Slack アプリの Client ID | (slack 出力の login に必須) |
 | `slack_client_secret` | Slack アプリの Client Secret | (login に必須) |
 | `slack_channel` | 投稿先チャンネル ID / 名前 | (投稿に必須) |
@@ -237,17 +239,18 @@ Go 1.26+ が必要。Finder/`.app` 起動では作業ディレクトリが `/` �
 ## 構成
 
 ```
-main.go                          サブコマンド(login/logout/run)・push-to-talk ループ
-internal/config/config.go        設定の読み込み・検証
+main.go                          サブコマンド(login/logout/run/dryrun/devices/keys)・メニューバー常駐・PTT/VAD ループ
+internal/config/config.go        設定の読み込み・検証(JSONC)
 internal/oauth/oauth.go          OAuth v2 フロー(自己署名 HTTPS コールバック → user token)
 internal/tokenstore/store.go     user token の Keychain 保存・読み出し
 internal/recorder/recorder.go    マイク録音 (malgo)。バッファ録音とストリーム録音
 internal/vad/vad.go              音声ストリームを無音で発話単位に区切る(VAD)
 internal/transcribe/whisper.go   whisper-cli 呼び出し(ローカル STT)・ノイズ除去
-internal/enhance/enhance.go      文字起こしをローカル LLM(Ollama)で整形(任意)
+internal/enhance/enhance.go      文字起こしをローカル LLM(Ollama)で整形・絵文字付与(任意)
 internal/slack/slack.go          chat.postMessage 投稿(本人名義)
 internal/keystroke/keystroke.go  フォーカス中のUIへ合成入力(Cmd+V 貼り付け / 任意で Enter)
 internal/modkey/modkey_darwin.go 単体修飾キー(右⌘ 等)の押下/解放を CGEventTap で検出
+internal/trayicon/trayicon.go    メニューバーのアイコン(待機/聞き取り=オレンジ/録音/文字起こし)
 ```
 
 ## 今後のアイデア
