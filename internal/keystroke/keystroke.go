@@ -69,14 +69,42 @@ static char* appBundleID(pid_t pid) {
     if (app == nil || app.bundleIdentifier == nil) return NULL;
     return strdup([app.bundleIdentifier UTF8String]);
 }
+
+// pbReadString は一般クリップボードの文字列を返す(呼び出し側が free)。無ければ NULL。
+// pbcopy/pbpaste の外部プロセスを介さないので LANG 依存の文字化けも起きない。
+static char* pbReadString() {
+    NSPasteboard *pb = [NSPasteboard generalPasteboard];
+    NSString *s = [pb stringForType:NSPasteboardTypeString];
+    if (s == nil) return NULL;
+    return strdup([s UTF8String]);
+}
+
+// pbWriteString は文字列をクリップボードに書き、書き込み後の changeCount を返す。
+// changeCount は「誰かが後からクリップボードを変えたか」を検知するために使う。
+static long pbWriteString(const char* utf8) {
+    NSPasteboard *pb = [NSPasteboard generalPasteboard];
+    [pb clearContents];
+    NSString *s = [NSString stringWithUTF8String:utf8];
+    if (s != nil) {
+        [pb setString:s forType:NSPasteboardTypeString];
+    }
+    return (long)[pb changeCount];
+}
+
+// pbChangeCount は現在の changeCount を返す(変更検知用)。
+static long pbChangeCount() {
+    return (long)[[NSPasteboard generalPasteboard] changeCount];
+}
+
+// pbClear はクリップボードを空にする(本文を残さないため)。
+static void pbClear() {
+    [[NSPasteboard generalPasteboard] clearContents];
+}
 */
 import "C"
 
 import (
-	"bytes"
-	"fmt"
-	"os"
-	"os/exec"
+	"errors"
 	"sync"
 	"time"
 	"unsafe"
@@ -154,22 +182,38 @@ func postKeyFor(sendKey string) (send bool, key C.CGKeyCode, flags C.CGEventFlag
 // defaultSendDelayMs は貼り付けから送信キーまでの既定待ち時間。
 const defaultSendDelayMs = 40
 
+// ErrTargetChanged は、貼り付け直前に最前面アプリが期待した固定先から外れていて
+// 貼り付けを中止したことを表す。固定モードの誤爆防止で使う。
+var ErrTargetChanged = errors.New("貼り付け直前に前面アプリが固定先から外れた")
+
 // Inject はフォーカス中のフィールドへ text を貼り付け、sendKey で指定された送信キーを続けて送る。
 // sendKey は none|enter|shift+enter|cmd+enter(none は貼り付けのみ)。
 // sendDelayMs は貼り付けから送信キーまでの待ち(0 以下で既定)。ブラウザ製エディタでは
 // ペースト確定前に Enter が届くとリスト継続にならないため、長めが要ることがある。
-func Inject(text string, sendKey string, sendDelayMs int) error {
+//
+// expectPID > 0 のとき(固定モード)は、クリップボードへ本文を載せてから Cmd+V を
+// 送る「直前」に最前面 PID を再確認し、期待先と違えば貼り付けを中止して
+// ErrTargetChanged を返す(退避したクリップボードは復元する)。呼び出し側の PID 判定と
+// 実際の送出の間に前面が変わる TOCTOU 窓を、送出の直前まで詰めるための再チェック。
+// expectPID <= 0(非固定モード=「発話終了時の最前面へ」)のときは再確認しない。
+func Inject(text string, sendKey string, sendDelayMs int, expectPID int) error {
 	if text == "" {
 		return nil
 	}
 	injectMu.Lock()
 	defer injectMu.Unlock()
 
-	prev, prevErr := readClipboard() // 退避(失敗しても続行)
-	if err := writeClipboard([]byte(text)); err != nil {
-		return fmt.Errorf("クリップボード設定失敗: %w", err)
+	prev, prevOK := readClipboard() // 退避(失敗しても続行)
+	writtenCC := writeClipboard(text)
+	time.Sleep(20 * time.Millisecond) // クリップボード反映待ち
+
+	// Cmd+V 送出の直前に前面アプリを再確認(固定モードのみ)。ずれていたら
+	// 本文を貼らずに退避を戻して中止する。これで判定〜送出間の窓を最小化する。
+	if expectPID > 0 && int(C.frontmostPID()) != expectPID {
+		restoreClipboard(prev, prevOK, writtenCC)
+		return ErrTargetChanged
 	}
-	time.Sleep(20 * time.Millisecond)                       // クリップボード反映待ち
+
 	C.sendKey(C.CGKeyCode(keyV), C.kCGEventFlagMaskCommand) // Cmd+V
 
 	if send, key, flags := postKeyFor(sendKey); send {
@@ -183,27 +227,40 @@ func Inject(text string, sendKey string, sendDelayMs int) error {
 
 	// 貼り付け完了を待ってから元のクリップボードへ戻す。
 	time.Sleep(120 * time.Millisecond)
-	if prevErr == nil {
-		_ = writeClipboard(prev)
-	}
+	restoreClipboard(prev, prevOK, writtenCC)
 	return nil
 }
 
-func readClipboard() ([]byte, error) {
-	cmd := exec.Command("pbpaste")
-	cmd.Env = utf8Env()
-	return cmd.Output()
+// restoreClipboard は退避したクリップボード内容を戻す。ただし、こちらが本文を
+// 書いた後(writtenCC)に他アプリ/ユーザがクリップボードを変更していれば、その
+// 新しい内容を尊重して何もしない(相手の上書きを消さない)。復元できない場合でも、
+// 本文がクリップボードに残り続けて漏れるのを防ぐため、少なくとも本文はクリアする。
+func restoreClipboard(prev string, prevOK bool, writtenCC int64) {
+	if int64(C.pbChangeCount()) != writtenCC {
+		return // 自分の書き込み以降に誰かが変更 → 触らない
+	}
+	if prevOK {
+		writeClipboard(prev)
+		return
+	}
+	// 退避が取れていない(元が空/非文字列)。本文を残さないようクリアする。
+	C.pbClear()
 }
 
-func writeClipboard(b []byte) error {
-	cmd := exec.Command("pbcopy")
-	cmd.Stdin = bytes.NewReader(b)
-	cmd.Env = utf8Env()
-	return cmd.Run()
+// readClipboard は現在のクリップボード文字列を返す。ok=false は文字列が無い
+// (画像等/空)ことを表す。
+func readClipboard() (string, bool) {
+	c := C.pbReadString()
+	if c == nil {
+		return "", false
+	}
+	defer C.free(unsafe.Pointer(c))
+	return C.GoString(c), true
 }
 
-// utf8Env は pbcopy/pbpaste に UTF-8 で入出力させるためのロケールを足した環境を返す。
-// .app(launchd)起動では LANG が空になり、pbcopy が UTF-8 を誤って解釈して文字化けするため。
-func utf8Env() []string {
-	return append(os.Environ(), "LANG=en_US.UTF-8", "LC_CTYPE=en_US.UTF-8")
+// writeClipboard は文字列をクリップボードに書き、書き込み後の changeCount を返す。
+func writeClipboard(s string) int64 {
+	cs := C.CString(s)
+	defer C.free(unsafe.Pointer(cs))
+	return int64(C.pbWriteString(cs))
 }

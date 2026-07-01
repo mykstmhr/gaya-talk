@@ -1,0 +1,50 @@
+name: CI
+
+# ビルド・テスト・静的解析・脆弱性チェックを PR と main への push で回す。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # cgo(CoreGraphics / AppKit 等)を使うため macOS ランナーで動かす。
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # go.mod の go ディレクティブ(1.26.4 以上)に追随させる。
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Build
+        run: go build -ldflags=-extldflags=-Wl,-no_warn_duplicate_libraries ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  govulncheck:
+    # 依存(標準ライブラリ含む)の既知脆弱性を継続的にチェックする。
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...

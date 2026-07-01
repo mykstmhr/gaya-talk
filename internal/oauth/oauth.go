@@ -10,9 +10,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,6 +40,14 @@ func Login(ctx context.Context, clientID, clientSecret, redirectURI string, user
 	if err != nil {
 		return nil, err
 	}
+	// PKCE(RFC 7636): 認可コードが横取りされても、code_verifier を知らない
+	// 第三者はコード交換を完遂できない。ローカルポート固定のコールバックを
+	// 別プロセスに先取りされる攻撃(ポートスクワッティング)への防御になる。
+	verifier, err := randomVerifier()
+	if err != nil {
+		return nil, err
+	}
+	challenge := codeChallengeS256(verifier)
 
 	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
@@ -82,7 +92,7 @@ func Login(ctx context.Context, clientID, clientSecret, redirectURI string, user
 	go srv.ServeTLS(ln, "", "")
 	defer srv.Close()
 
-	authURL := authorizeURL(clientID, userScopes, redirectURI, state)
+	authURL := authorizeURL(clientID, userScopes, redirectURI, state, challenge)
 	fmt.Println("ブラウザで Slack の認可ページを開きます。")
 	fmt.Println("もし開かない場合は次の URL を手動で開いてください:")
 	fmt.Println("  " + authURL)
@@ -97,26 +107,31 @@ func Login(ctx context.Context, clientID, clientSecret, redirectURI string, user
 	case err := <-errCh:
 		return nil, err
 	case code := <-codeCh:
-		return exchange(ctx, clientID, clientSecret, code, redirectURI)
+		return exchange(ctx, clientID, clientSecret, code, redirectURI, verifier)
 	}
 }
 
 // authorizeURL は認可ページの URL を組み立てる。user scope のみ要求する。
-func authorizeURL(clientID string, userScopes []string, redirectURI, state string) string {
+// challenge は PKCE の code_challenge(S256)。
+func authorizeURL(clientID string, userScopes []string, redirectURI, state, challenge string) string {
 	q := url.Values{}
 	q.Set("client_id", clientID)
 	q.Set("user_scope", strings.Join(userScopes, ","))
 	q.Set("redirect_uri", redirectURI)
 	q.Set("state", state)
+	q.Set("code_challenge", challenge)
+	q.Set("code_challenge_method", "S256")
 	return "https://slack.com/oauth/v2/authorize?" + q.Encode()
 }
 
 // exchange は code を oauth.v2.access で user token に交換する。
-func exchange(ctx context.Context, clientID, clientSecret, code, redirectURI string) (*Result, error) {
+// verifier は PKCE の code_verifier(認可時に送った challenge の元)。
+func exchange(ctx context.Context, clientID, clientSecret, code, redirectURI, verifier string) (*Result, error) {
 	form := url.Values{}
 	form.Set("client_id", clientID)
 	form.Set("client_secret", clientSecret)
 	form.Set("code", code)
+	form.Set("code_verifier", verifier)
 	form.Set("redirect_uri", redirectURI)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -167,6 +182,24 @@ func randomState() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// randomVerifier は PKCE の code_verifier を生成する。
+// RFC 7636 は 43〜128 文字の [A-Za-z0-9-._~] を求める。32 バイトの乱数を
+// base64url(パディング無し)にすると 43 文字になり要件を満たす。
+func randomVerifier() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// codeChallengeS256 は verifier から code_challenge を作る:
+// BASE64URL(SHA256(verifier))(パディング無し)。RFC 7636 の S256 方式。
+func codeChallengeS256(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // selfSignedCert は localhost 用の自己署名証明書をメモリ上で生成する。

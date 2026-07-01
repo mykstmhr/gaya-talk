@@ -145,6 +145,10 @@ type EnhanceConfig struct {
 	Endpoint string `json:"endpoint"` // Ollama エンドポイント
 	Model    string `json:"model"`    // 使うモデル名(例 qwen2.5:7b)
 	Prompt   string `json:"prompt"`   // 整形プロンプト(空で既定)
+	// AllowRemote は endpoint に非ローカル(localhost 以外)のホストを許すか。
+	// 既定 false では発話本文が外部へ出るのを防ぐため非ローカル endpoint を拒否する。
+	// 意図的にリモート Ollama を使う場合のみ true にする。
+	AllowRemote bool `json:"allow_remote"`
 }
 
 // EmojiConfig は発話内容に応じて末尾に絵文字を付ける設定(本文は変えない)。
