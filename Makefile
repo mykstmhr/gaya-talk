@@ -1,4 +1,4 @@
-.PHONY: build run tidy clean setup app app-open model enhance-model restart
+.PHONY: build run tidy clean setup app app-open model whisper-model enhance-model restart
 
 # cgo の -lobjc 重複によるリンカ警告(無害)を抑止する。
 LDFLAGS := -ldflags=-extldflags=-Wl,-no_warn_duplicate_libraries
@@ -18,8 +18,8 @@ CONFIG := $(HOME)/.config/ura-talk/config.json
 # 証明書がキーチェーンに無ければ自動でアドホック(-)にフォールバックする。
 SIGN_IDENTITY ?= ura-talk-dev
 
-# 初回セットアップ: config を配置し、whisper モデルを取得する(make app の前に一度だけ)。
-setup: model
+# 初回セットアップ: config を配置し、whisper モデルを選んで取得する(make app の前に一度だけ)。
+setup:
 	@mkdir -p $(dir $(CONFIG))
 	@if [ -f "$(CONFIG)" ]; then \
 	  echo "既にあります(上書きしません): $(CONFIG)"; \
@@ -27,6 +27,7 @@ setup: model
 	  cp config.example.json "$(CONFIG)"; \
 	  echo "配置しました: $(CONFIG)(必要に応じ編集)"; \
 	fi
+	@$(MAKE) whisper-model
 
 build:
 	go build $(LDFLAGS) -o bin/ura-talk .
@@ -60,7 +61,8 @@ restart:
 	@open $(APP)
 	@echo "再起動しました(ログ: ~/Library/Logs/ura-talk.log)"
 
-# whisper モデルを ~/.config/ura-talk/models/ にダウンロードする(約1.5GB、既にあれば skip)。
+# whisper モデルを ~/.config/ura-talk/models/ にダウンロードする(既定 turbo、既にあれば skip)。
+# 特定モデルを直接指定するとき: make model MODEL=ggml-large-v3.bin
 model:
 	@mkdir -p $(MODEL_DIR)
 	@if [ -f "$(MODEL_DIR)/$(MODEL)" ]; then \
@@ -69,6 +71,33 @@ model:
 	  echo "ダウンロード中: $(MODEL_URL)"; \
 	  curl -L --fail -o "$(MODEL_DIR)/$(MODEL)" "$(MODEL_URL)"; \
 	  echo "保存: $(MODEL_DIR)/$(MODEL)"; \
+	fi
+
+# whisper モデルを候補から選んで取得し、config の whisper_model に反映する(setup から呼ばれる)。
+whisper-model:
+	@mkdir -p $(MODEL_DIR)
+	@echo "whisper モデルを選んでください(数字を入力):"; \
+	echo "  1) ggml-large-v3-turbo.bin       速い・軽い(おすすめ既定, 約1.5GB)"; \
+	echo "  2) ggml-large-v3.bin             高精度・重い(約3GB)"; \
+	echo "  3) ggml-large-v3-turbo-q5_0.bin  量子化 turbo・最軽量(約1GB)"; \
+	printf "番号 [1]: "; read n; \
+	case "$$n" in \
+	  2) m=ggml-large-v3.bin ;; \
+	  3) m=ggml-large-v3-turbo-q5_0.bin ;; \
+	  *) m=ggml-large-v3-turbo.bin ;; \
+	esac; \
+	if [ -f "$(MODEL_DIR)/$$m" ]; then \
+	  echo "既にあります: $(MODEL_DIR)/$$m"; \
+	else \
+	  echo "→ $$m をダウンロードします"; \
+	  curl -L --fail -o "$(MODEL_DIR)/$$m" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$$m" || { echo "ダウンロード失敗"; exit 1; }; \
+	  echo "保存: $(MODEL_DIR)/$$m"; \
+	fi; \
+	if [ -f "$(CONFIG)" ]; then \
+	  sed -i '' "s|\"whisper_model\": *\"[^\"]*\"|\"whisper_model\": \"~/.config/ura-talk/models/$$m\"|" "$(CONFIG)"; \
+	  echo "✅ whisper_model を $$m に更新: $(CONFIG)"; \
+	else \
+	  echo "⚠️ $(CONFIG) が無いので whisper_model は手動設定してください(値: ~/.config/ura-talk/models/$$m)"; \
 	fi
 
 # 整形用の LLM(Ollama)モデルを選んで pull し、config の enhance.model に反映する。

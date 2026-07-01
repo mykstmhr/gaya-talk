@@ -22,7 +22,7 @@
 
 ```sh
 brew install whisper-cpp   # 文字起こしエンジン(初回のみ)
-make setup                 # config を配置 + whisper モデルを取得(約1.5GB)
+make setup                 # config を配置 + whisper モデルを選んで取得(番号選択)
 make app-open              # .app をビルドして起動。初回はマイク/アクセシビリティを許可
 ```
 
@@ -30,7 +30,7 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 - 設定は **`~/.config/ura-talk/config.json`**(`make setup` が配置。`.app` はここを読む)。全項目は[設定](#設定-configjson)を参照。
 - config を編集したら **`make restart`** で反映。
-- モデルは `~/.config/ura-talk/models/`。軽量化したいなら量子化版 `ggml-large-v3-turbo-q5_0.bin` を `make model MODEL=ggml-large-v3-turbo-q5_0.bin` で取得し、`whisper_model` を差し替え。
+- モデルは `~/.config/ura-talk/models/`。`make setup` 時に **番号で選択**(1=turbo 速い・軽い / 2=large-v3 高精度・重い / 3=turbo 量子化 最軽量)。あとから変えたいときは **`make whisper-model`** で選び直す(config の `whisper_model` も自動更新)。特定モデルを直接入れるなら `make model MODEL=<ファイル名>`。
 
 > **任意**: 日本語をもっと読みやすくしたいなら、ローカル LLM 整形(`make enhance-model`)も使える → [ローカル LLM 整形](#ローカル-llm-整形任意)。
 
