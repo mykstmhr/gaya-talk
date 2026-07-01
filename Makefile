@@ -1,4 +1,4 @@
-.PHONY: help build clean setup app app-open model whisper-model enhance-model restart
+.PHONY: help build clean setup app app-open model whisper-model enhance-model restart logs
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -66,6 +66,13 @@ restart: ## 起動中の .app を停止して開き直す(config 変更の反映
 	@sleep 1
 	@open $(APP)
 	@echo "再起動しました(ログ: ~/Library/Logs/ura-talk.log)"
+
+# .app 起動時のログ(~/Library/Logs/ura-talk.log)を追尾する。
+# ログの実体は macOS の作法どおり ~/Library/Logs/ に置く(リポジトリ内には置かない:
+# 発話由来の内容を含みうるため誤コミットを避け、.app の CWD にも依存しない)。
+logs: ## .app のログ(~/Library/Logs/ura-talk.log)を tail -f で追う
+	@touch ~/Library/Logs/ura-talk.log
+	@tail -f ~/Library/Logs/ura-talk.log
 
 # whisper モデルを ~/.config/ura-talk/models/ にダウンロードする(既定 turbo、既にあれば skip)。
 # 特定モデルを直接指定するとき: make model MODEL=ggml-large-v3.bin

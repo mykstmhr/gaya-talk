@@ -236,7 +236,7 @@ make clean     # bin / .app を削除
 
 > 端末から直接動作確認するなら `go run . dryrun` / `go run . devices`。ただしメニューバー常駐(ホットキー・貼り付け)の権限は署名済み `.app` に紐づくので、実挙動の確認は `make app-open` を使う。
 
-Go 1.26.4+ が必要(標準ライブラリの既知脆弱性の修正を含むパッチ版)。Finder/`.app` 起動では作業ディレクトリが `/` になり環境変数 `URATALK_*` も効かないため、設定は `~/.config/ura-talk/config.json` を読む。ログは `.app` 起動時 `~/Library/Logs/ura-talk.log`(パーミッション `0600`)、端末起動時は標準エラー。発話本文は既定でログに残さず(文字数のみ)、`URATALK_DEBUG=1` のときだけ本文を出す。多重起動はファイルロックで防止。
+Go 1.26.4+ が必要(標準ライブラリの既知脆弱性の修正を含むパッチ版)。Finder/`.app` 起動では作業ディレクトリが `/` になり環境変数 `URATALK_*` も効かないため、設定は `~/.config/ura-talk/config.json` を読む。ログは `.app` 起動時 `~/Library/Logs/ura-talk.log`(パーミッション `0600`)、端末起動時は標準エラー。`.app` のログは `make logs`(`tail -f`)で追える。発話本文は既定でログに残さず(文字数のみ)、`URATALK_DEBUG=1` のときだけ本文を出す。多重起動はファイルロックで防止。
 
 ## 構成
 
