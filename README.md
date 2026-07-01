@@ -163,7 +163,7 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 ./bin/ura-talk logout   # token を削除
 ```
 
-> Redirect URL は HTTPS 必須。認可時に自己署名証明書付きのローカル HTTPS サーバを立てるため、ブラウザで一度だけ証明書警告が出る(「詳細 → このまま続行」)。client_secret は config に書かず `URATALK_SLACK_CLIENT_SECRET` 環境変数でも渡せる。
+> Redirect URL は HTTPS 必須。認可時に自己署名証明書付きのローカル HTTPS サーバを立てるため、ブラウザで一度だけ証明書警告が出る(「詳細 → このまま続行」)。client_secret は config に書かず `URATALK_SLACK_CLIENT_SECRET` 環境変数でも渡せる。認可には PKCE(S256)を使うため、コールバックの認可コードを横取りされても第三者はトークン交換を完遂できない(Slack アプリ側の追加設定は不要)。
 
 ## 設定 (config.json)
 
