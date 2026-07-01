@@ -1,4 +1,13 @@
-.PHONY: build run tidy clean setup app app-open model whisper-model enhance-model restart
+.PHONY: help build run tidy clean setup app app-open model whisper-model enhance-model restart
+
+# 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
+.DEFAULT_GOAL := help
+
+# 各ターゲット末尾の `## 説明` を集めて一覧表示する。
+help: ## このヘルプを表示する
+	@echo "ura-talk make targets:"; \
+	grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | sort | \
+	awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 # cgo の -lobjc 重複によるリンカ警告(無害)を抑止する。
 LDFLAGS := -ldflags=-extldflags=-Wl,-no_warn_duplicate_libraries
@@ -19,7 +28,7 @@ CONFIG := $(HOME)/.config/ura-talk/config.json
 SIGN_IDENTITY ?= ura-talk-dev
 
 # 初回セットアップ: config を配置し、whisper モデルを選んで取得する(make app の前に一度だけ)。
-setup:
+setup: ## 初回セットアップ(config 配置 + whisper モデルを選んで取得)
 	@mkdir -p $(dir $(CONFIG))
 	@if [ -f "$(CONFIG)" ]; then \
 	  echo "既にあります(上書きしません): $(CONFIG)"; \
@@ -29,15 +38,15 @@ setup:
 	fi
 	@$(MAKE) whisper-model
 
-build:
+build: ## バイナリをビルド(bin/ura-talk)
 	go build $(LDFLAGS) -o bin/ura-talk .
 
-run:
+run: ## 端末から直接起動する(開発用)
 	go run $(LDFLAGS) .
 
 # .app バンドルを生成し、アドホック署名する。
 # 権限(マイク/アクセシビリティ)はこの .app の身元に紐づくようになる。
-app: build
+app: build ## .app を生成して署名する
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS
 	cp bin/ura-talk $(APP)/Contents/MacOS/ura-talk
@@ -50,12 +59,12 @@ app: build
 	echo "built $(APP) (signed with: $$id)"
 
 # 生成した .app を起動する(ログは ~/Library/Logs/ura-talk.log)。
-app-open: app
+app-open: app ## .app をビルドして起動する
 	open $(APP)
 
 # 起動中の ura-talk を停止して開き直す(config 変更の反映など)。
 # -x はプロセス名で完全一致するので、pkill 自身のシェル行を誤爆しない。
-restart:
+restart: ## 起動中の .app を停止して開き直す(config 変更の反映。再ビルドはしない)
 	@pkill -x ura-talk 2>/dev/null || true
 	@sleep 1
 	@open $(APP)
@@ -63,7 +72,7 @@ restart:
 
 # whisper モデルを ~/.config/ura-talk/models/ にダウンロードする(既定 turbo、既にあれば skip)。
 # 特定モデルを直接指定するとき: make model MODEL=ggml-large-v3.bin
-model:
+model: ## whisper モデルを直接指定して取得(make model MODEL=<file>)
 	@mkdir -p $(MODEL_DIR)
 	@if [ -f "$(MODEL_DIR)/$(MODEL)" ]; then \
 	  echo "既にあります: $(MODEL_DIR)/$(MODEL)"; \
@@ -74,7 +83,7 @@ model:
 	fi
 
 # whisper モデルを候補から選んで取得し、config の whisper_model に反映する(setup から呼ばれる)。
-whisper-model:
+whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	@mkdir -p $(MODEL_DIR)
 	@echo "whisper モデルを選んでください(数字を入力):"; \
 	echo "  1) ggml-large-v3-turbo.bin       速い・軽い(おすすめ既定, 約1.5GB)"; \
@@ -101,7 +110,7 @@ whisper-model:
 	fi
 
 # 整形用の LLM(Ollama)モデルを選んで pull し、config の enhance.model に反映する。
-enhance-model:
+enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config も更新)
 	@command -v ollama >/dev/null 2>&1 || { echo "ollama が必要です: brew install ollama"; exit 1; }
 	@echo "整形に使う Ollama モデルを選んでください(数字を入力):"; \
 	echo "  1) qwen2.5:7b    高品質・遅め(ロード~15s)"; \
@@ -125,8 +134,8 @@ enhance-model:
 	fi; \
 	echo "反映するには: make restart"
 
-tidy:
+tidy: ## go mod tidy
 	go mod tidy
 
-clean:
+clean: ## ビルド成果物を削除する
 	rm -rf bin $(APP)
