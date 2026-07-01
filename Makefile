@@ -1,4 +1,4 @@
-.PHONY: help build run tidy clean setup app app-open model whisper-model enhance-model restart
+.PHONY: help build clean setup app app-open model whisper-model enhance-model restart
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -40,9 +40,6 @@ setup: ## 初回セットアップ(config 配置 + whisper モデルを選んで
 
 build: ## バイナリをビルド(bin/ura-talk)
 	go build $(LDFLAGS) -o bin/ura-talk .
-
-run: ## 端末から直接起動する(開発用)
-	go run $(LDFLAGS) .
 
 # .app バンドルを生成し、アドホック署名する。
 # 権限(マイク/アクセシビリティ)はこの .app の身元に紐づくようになる。
@@ -133,9 +130,6 @@ enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config
 	  echo "⚠️ $(CONFIG) が無いので enhance.model は手動設定してください(値: $$m)"; \
 	fi; \
 	echo "反映するには: make restart"
-
-tidy: ## go mod tidy
-	go mod tidy
 
 clean: ## ビルド成果物を削除する
 	rm -rf bin $(APP)

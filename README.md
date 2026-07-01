@@ -222,13 +222,15 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 ## ビルドと実行
 
 ```sh
+make           # ターゲット一覧(help)
 make build     # bin/ura-talk を生成
-make run       # ビルドせず go run で起動(端末ログを見ながら開発)
 make app       # build/ura-talk.app を生成して署名
+make app-open  # ビルドして .app を起動
 make restart   # 起動中の .app を停止して開き直す
-make tidy      # go mod tidy
 make clean     # bin / .app を削除
 ```
+
+> 端末から直接動作確認するなら `go run . dryrun` / `go run . devices`。ただしメニューバー常駐(ホットキー・貼り付け)の権限は署名済み `.app` に紐づくので、実挙動の確認は `make app-open` を使う。
 
 Go 1.26+ が必要。Finder/`.app` 起動では作業ディレクトリが `/` になり環境変数 `URATALK_*` も効かないため、設定は `~/.config/ura-talk/config.json` を読む。ログは `.app` 起動時 `~/Library/Logs/ura-talk.log`、端末起動時は標準エラー。多重起動はファイルロックで防止。
 
