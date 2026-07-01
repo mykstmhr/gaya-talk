@@ -133,6 +133,7 @@ make enhance-model
 - 翻訳・加筆を禁止するプロンプトで整形。**失敗時は生テキストをそのまま出力**するので壊れない。整形中はメニューバーが吹き出しアイコンになる。
 - 起動時にモデルをウォームアップ + `keep_alive` で常駐させるのでコールドスタート待ちは出ない。それでも 7B は 1 発話あたり数秒かかる。速さ重視なら `qwen2.5:3b`、不要なら `enabled: false`。
 - 起動ログで使用可否(`✅ 整形(Ollama)有効…` / `⚠️ …使えません`)、発話ごとに `整形 ✏️ "前" → "後"` が出る。
+- **`endpoint` には発話本文がそのまま送られる**。誤って外部 URL を指しても発話が外部に流出しないよう、既定(`enhance.allow_remote: false`)では `localhost` / `127.0.0.1` / `::1` 以外の `endpoint` を拒否する(整形・絵文字はスキップされ、発話は送られない)。意図的にリモートの Ollama を使う場合のみ `enhance.allow_remote: true`(発話が外部に出る点に注意)。
 
 ## ショートカットキーの変更
 
@@ -199,6 +200,7 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | `enhance.enabled` | 文字起こしをローカル LLM(Ollama)で整形するか | `true` |
 | `enhance.model` | 整形に使う Ollama モデル(例 `qwen2.5:7b` / `qwen2.5:3b`) | `qwen2.5:7b` |
 | `enhance.endpoint` | Ollama エンドポイント | `http://localhost:11434` |
+| `enhance.allow_remote` | `endpoint` に `localhost` 以外を許すか。**発話本文が送られる**ため既定 `false` では非ローカル URL を拒否し発話を外部に出さない。リモート Ollama を使う場合のみ `true` | `false` |
 | `enhance.prompt` | 整形プロンプト(空で既定の「整形のみ・翻訳/加筆禁止」) | (既定) |
 | `emoji.mode` | 発話内容に応じて末尾に絵文字を付ける(本文は変えない)。`off` / `light`(控えめ)/ `cheerful`(積極的)。enhance と同じ Ollama を使う | `off` |
 | `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |

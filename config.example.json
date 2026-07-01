@@ -114,7 +114,12 @@
         "backend": "ollama",
         "endpoint": "http://localhost:11434",
         "model": "qwen2.5:3b",
-        "prompt": ""
+        "prompt": "",
+        // allow_remote: endpoint に localhost 以外のホストを許すか(既定 false)。
+        // ⚠️ endpoint には発話本文がそのまま送られる。false のままなら localhost/
+        //    127.0.0.1/::1 以外の endpoint は拒否され、発話が外部へ出ることはない。
+        //    意図的にリモート Ollama を使う場合のみ true にする(発話が外部に出る点に注意)。
+        "allow_remote": false
     },
     // 発話内容に応じて末尾に絵文字を付ける(本文は変えない)。上の Ollama を使う。
     // mode: off(付けない=ビジネスライク)/ light(控えめ)/ cheerful(積極的に明るく)

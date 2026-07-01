@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -43,6 +44,9 @@ type Config struct {
 	Prompt    string // システムプロンプト(空なら defaultPrompt)
 	KeepAlive string // モデルをメモリに保持する時間(空なら "30m")。コールドスタート対策。
 	EmojiMode string // 末尾に絵文字を付けるモード: off|light|cheerful(off/空 は付けない)
+	// AllowRemote は endpoint に非ローカル(localhost 以外)のホストを許すか。
+	// 既定 false では発話本文が外部へ出るのを防ぐため非ローカル endpoint を拒否する。
+	AllowRemote bool
 }
 
 // active は LLM(Ollama)を使う必要があるか(整形か絵文字のどちらかが有効)を返す。
@@ -71,6 +75,30 @@ func New(cfg Config) *Enhancer {
 		cfg.KeepAlive = "30m" // モデルを温存してコールドスタートを防ぐ
 	}
 	return &Enhancer{cfg: cfg, http: &http.Client{Timeout: 60 * time.Second}}
+}
+
+// isLocalEndpoint は endpoint のホストがローカル(localhost / 127.0.0.1 / ::1)かを返す。
+// パースできない endpoint は「ローカルでない」と扱う(既定拒否で安全側に倒す)。
+func isLocalEndpoint(endpoint string) bool {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+// ensureLocalOrAllowed は endpoint が非ローカルなのに AllowRemote が無効なら
+// エラーを返す。発話本文が外部へ流出しないための最後のガード。
+func (e *Enhancer) ensureLocalOrAllowed() error {
+	if e.cfg.AllowRemote || isLocalEndpoint(e.cfg.Endpoint) {
+		return nil
+	}
+	return fmt.Errorf("非ローカルの endpoint (%s) は既定で拒否します。発話本文が外部へ送られるのを防ぐためです。意図的にリモート Ollama を使う場合は enhance.allow_remote: true を設定してください", e.cfg.Endpoint)
 }
 
 // reachable は Ollama サーバが応答するかを確認する。
@@ -186,6 +214,9 @@ func (e *Enhancer) Check(ctx context.Context) error {
 	if !e.active() {
 		return nil
 	}
+	if err := e.ensureLocalOrAllowed(); err != nil {
+		return err
+	}
 	if e.cfg.Model == "" {
 		return fmt.Errorf("model が未設定")
 	}
@@ -236,6 +267,11 @@ func (e *Enhancer) callOllama(ctx context.Context, raw string) (string, error) {
 
 // postChat は Ollama の /api/chat を非ストリームで呼び、assistant の本文を返す。
 func (e *Enhancer) postChat(ctx context.Context, messages []map[string]string) (string, error) {
+	// 送信直前の最終ガード。config 再読込等で Check を経ず本メソッドに至った場合でも、
+	// 発話本文が非ローカル endpoint へ出るのを防ぐ。
+	if err := e.ensureLocalOrAllowed(); err != nil {
+		return "", err
+	}
 	payload, err := json.Marshal(map[string]any{
 		"model":      e.cfg.Model,
 		"stream":     false,

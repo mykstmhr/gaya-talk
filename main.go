@@ -658,11 +658,12 @@ func serve(dryRun bool) {
 
 	// 文字起こし整形/絵文字付与(ローカル LLM)。無効でも New は安全。
 	enhancer = enhance.New(enhance.Config{
-		Enabled:   cfg.Enhance.Enabled,
-		Endpoint:  cfg.Enhance.Endpoint,
-		Model:     cfg.Enhance.Model,
-		Prompt:    cfg.Enhance.Prompt,
-		EmojiMode: cfg.Emoji.Mode,
+		Enabled:     cfg.Enhance.Enabled,
+		Endpoint:    cfg.Enhance.Endpoint,
+		Model:       cfg.Enhance.Model,
+		Prompt:      cfg.Enhance.Prompt,
+		EmojiMode:   cfg.Emoji.Mode,
+		AllowRemote: cfg.Enhance.AllowRemote,
 	})
 	// 整形か絵文字のどちらかが有効なら Ollama を用意する。
 	llmNeeded := cfg.Enhance.Enabled || (cfg.Emoji.Mode != "" && cfg.Emoji.Mode != "off")
