@@ -62,11 +62,14 @@ func setupLogging() {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "ura-talk.log"),
-		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	logPath := filepath.Join(dir, "ura-talk.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
+	// 既存ファイルが以前の 0o644 で作られている場合に備え、所有者のみへ絞る
+	// (発話由来の内容を含みうるため、他ユーザから読めないようにする)。
+	_ = os.Chmod(logPath, 0o600)
 	log.SetOutput(f)
 }
 
@@ -953,6 +956,22 @@ func startFocusWatch(cfg *config.Config, focusLost chan struct{}) chan struct{} 
 	return stop
 }
 
+// logBodyEnabled は発話本文をログに出してよいか(URATALK_DEBUG が設定されているか)。
+// 既定では発話内容(会議・機微な発言になりうる)を永続ログ ~/Library/Logs/ura-talk.log に
+// 平文で残さない。デバッグ時のみ本文を出す。
+func logBodyEnabled() bool {
+	return os.Getenv("URATALK_DEBUG") != ""
+}
+
+// bodyForLog は本文をログ用に整形する。デバッグ時は本文そのもの、通常時は
+// 内容を伏せて文字数のみ(例: "(12文字)")を返す。
+func bodyForLog(s string) string {
+	if logBodyEnabled() {
+		return fmt.Sprintf("%q", s)
+	}
+	return fmt.Sprintf("(%d文字)", len([]rune(s)))
+}
+
 // handle は 1 回の発話(PCM)を正規化・文字起こしして出力先へ渡す。
 // out.send が nil のときは出力せず、文字起こし結果を表示するだけ(ドライラン)。
 func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
@@ -983,7 +1002,7 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 		case eerr != nil:
 			log.Printf("整形スキップ(生テキスト使用): %v", eerr)
 		case enhanced != text:
-			log.Printf("整形 ✏️ %q → %q", text, enhanced)
+			log.Printf("整形 ✏️ %s → %s", bodyForLog(text), bodyForLog(enhanced))
 		default:
 			log.Println("整形: 変化なし(そのまま)")
 		}
@@ -1009,6 +1028,8 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 
 	msg := out.prefix + text
 	if out.send == nil {
+		// ドライランは「出力せず結果を目視確認する」のが目的なので本文を出す
+		// (端末での動作確認用モード。通常運用の常時ログとは別)。
 		log.Printf("(ドライラン)文字起こし結果: %s", msg)
 		return
 	}
@@ -1019,7 +1040,8 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 		log.Printf("出力失敗(%s): %v", out.name, err)
 		return
 	}
-	log.Printf("→ %s: %s", out.name, msg)
+	// 発話本文は既定でログに残さない(URATALK_DEBUG のときだけ本文を出す)。
+	log.Printf("→ %s: %s", out.name, bodyForLog(msg))
 }
 
 // parseHotkey は設定の文字列を hotkey ライブラリの型に変換する。
