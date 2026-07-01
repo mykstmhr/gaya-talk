@@ -15,6 +15,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -216,15 +217,27 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 		out.name = "keystroke"
 		out.send = func(_ context.Context, text string) error {
 			dest := keystroke.CaptureFrontmost() // 今まさに貼り付く先(=最前面アプリ)
+			// expectPID>0 のとき Inject は Cmd+V 送出の直前に前面 PID を再確認する
+			// (判定〜送出間に前面が変わる TOCTOU 窓を詰める)。固定モードのときだけ設定。
+			expectPID := 0
 			if pinTargetOn.Load() {
-				if t := pinnedSnapshot(); t.PID > 0 && dest.PID != t.PID {
+				t := pinnedSnapshot()
+				if t.PID > 0 && dest.PID != t.PID {
 					log.Printf("⏸ 固定先「%s」が前面にないため貼り付けをスキップしました。", t.Name)
 					return nil
+				}
+				if t.PID > 0 {
+					expectPID = t.PID
 				}
 			}
 			// 貼り付け先アプリに応じて送信キーを解決(override → 既定 send_key → auto_enter)。
 			sendKey := resolveSendKey(cfg, dest.Name, dest.BundleID)
-			return keystroke.Inject(text, sendKey, cfg.Keystroke.SendDelayMs)
+			err := keystroke.Inject(text, sendKey, cfg.Keystroke.SendDelayMs, expectPID)
+			if errors.Is(err, keystroke.ErrTargetChanged) {
+				log.Println("⏸ 貼り付け直前に前面が固定先から外れたためスキップしました。")
+				return nil
+			}
+			return err
 		}
 		return out
 	case "slack", "":
