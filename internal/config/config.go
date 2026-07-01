@@ -65,12 +65,17 @@ type Config struct {
 
 // KeystrokeConfig は合成入力(keystroke)出力の設定。
 type KeystrokeConfig struct {
-	// AutoEnter は後方互換用。send_key が未指定のときの既定として解釈する(true=enter, false=none)。
+	// AutoEnter は「貼り付け後にキーを送るか」の最上位スイッチ。
+	// false なら何も送らない(send_key / overrides も無視)。true のときだけ下の設定が効く。
 	AutoEnter bool `json:"auto_enter"`
-	// SendKey は貼り付け後に送る「送信キー」の既定: none|enter|shift+enter|cmd+enter。
-	// 空なら AutoEnter にフォールバックする。
-	SendKey   string `json:"send_key"`
-	PinTarget bool   `json:"pin_target"` // リッスン開始時に最前面だったアプリを固定し、そのアプリが前面のときだけ貼り付けるか
+	// SendKey は auto_enter=true のときに送るキー: enter|shift+enter|cmd+enter|none。
+	// 空なら enter。
+	SendKey string `json:"send_key"`
+	// SendDelayMs は貼り付け(Cmd+V)から送信キーを送るまでの待ち時間(ミリ秒)。
+	// Notion/Cosense 等のブラウザ製エディタはペースト処理が非同期で重く、短すぎると
+	// Enter がペースト確定前に届いてリスト継続にならない。0 以下なら既定(40ms)。
+	SendDelayMs int  `json:"send_delay_ms"`
+	PinTarget   bool `json:"pin_target"` // リッスン開始時に最前面だったアプリを固定し、そのアプリが前面のときだけ貼り付けるか
 	// Overrides はアプリ別の送信キー上書き。貼り付け先アプリが app に一致すれば
 	// その send_key を使う(Slack は enter で送信、別アプリは cmd+enter、ドキュメントは enter で改行、等)。
 	Overrides []KeystrokeOverride `json:"overrides"`
@@ -82,25 +87,27 @@ type KeystrokeOverride struct {
 	SendKey string `json:"send_key"` // このアプリでの送信キー: none|enter|shift+enter|cmd+enter
 }
 
-// SendKeyFor は貼り付け先アプリ(表示名 name / bundle id bundleID)に対する送信キーを
+// SendKeyFor は貼り付け先アプリ(表示名 name / bundle id bundleID)に送る送信キーを
 // 正規化して返す(none|enter|shift+enter|cmd+enter)。
-// 優先順: 一致する override の send_key → 既定 send_key → auto_enter(true=enter, false=none)。
+// auto_enter が最上位スイッチ: false なら常に none(何も送らない)。true のときだけ
+// 既定 enter → 全体 send_key → 一致する override の send_key、の順で上書きして決める。
 func (k KeystrokeConfig) SendKeyFor(name, bundleID string) string {
+	if !k.AutoEnter {
+		return "none"
+	}
+	key := "enter" // auto_enter=true の既定キー
+	if s := normalizeSendKey(k.SendKey); s != "" {
+		key = s
+	}
 	for _, o := range k.Overrides {
 		if matchApp(o.App, name, bundleID) {
 			if s := normalizeSendKey(o.SendKey); s != "" {
-				return s
+				key = s
 			}
-			break // app は一致したが send_key 未指定 → 既定へフォールバック
+			break
 		}
 	}
-	if s := normalizeSendKey(k.SendKey); s != "" {
-		return s
-	}
-	if k.AutoEnter {
-		return "enter"
-	}
-	return "none"
+	return key
 }
 
 // normalizeSendKey は send_key の表記ゆれを正規トークンへ。未指定/不明は ""(=既定にフォールバック)。
@@ -214,7 +221,8 @@ func Load() (*Config, error) {
 	}
 	if path != "" {
 		if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
-			if err := json.Unmarshal(data, cfg); err != nil {
+			// JSONC(コメント・末尾カンマ)を許可するため、素の JSON へ落としてから読む。
+			if err := json.Unmarshal(stripJSONC(data), cfg); err != nil {
 				return nil, fmt.Errorf("設定ファイル %s のパースに失敗: %w", path, err)
 			}
 		}

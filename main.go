@@ -219,7 +219,7 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 			}
 			// 貼り付け先アプリに応じて送信キーを解決(override → 既定 send_key → auto_enter)。
 			sendKey := cfg.Keystroke.SendKeyFor(dest.Name, dest.BundleID)
-			return keystroke.Inject(text, sendKey)
+			return keystroke.Inject(text, sendKey, cfg.Keystroke.SendDelayMs)
 		}
 		return out
 	case "slack", "":

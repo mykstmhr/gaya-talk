@@ -2,30 +2,44 @@ package config
 
 import "testing"
 
-func TestSendKeyFor(t *testing.T) {
+// TestSendKeyForMasterOff は auto_enter=false が最上位で、send_key/overrides を無視して
+// 常に none になることを確認する。
+func TestSendKeyForMasterOff(t *testing.T) {
 	k := KeystrokeConfig{
-		AutoEnter: false, // send_key 未指定時の既定 = none
-		SendKey:   "",    // 既定 send_key も未指定
+		AutoEnter: false,
+		SendKey:   "cmd+enter", // 設定されていても…
+		Overrides: []KeystrokeOverride{{App: "Slack", SendKey: "enter"}},
+	}
+	if got := k.SendKeyFor("Slack", ""); got != "none" {
+		t.Errorf("auto_enter=false は send_key/override を無視して none: got %q", got)
+	}
+	if got := k.SendKeyFor("X", ""); got != "none" {
+		t.Errorf("auto_enter=false は常に none: got %q", got)
+	}
+}
+
+// TestSendKeyForMasterOn は auto_enter=true のとき 既定 enter → send_key → override の順で
+// 上書きされることを確認する。
+func TestSendKeyForMasterOn(t *testing.T) {
+	k := KeystrokeConfig{
+		AutoEnter: true,
+		SendKey:   "", // 既定 enter
 		Overrides: []KeystrokeOverride{
-			{App: "Slack", SendKey: "enter"},                 // 名前一致
-			{App: "com.google.Chrome", SendKey: "cmd+enter"}, // bundle id 一致 + 表記
-			{App: " Notion ", SendKey: "shift+enter"},        // 前後空白
-			{App: "Listed", SendKey: ""},                     // app は一致しても send_key 未指定
+			{App: "Slack", SendKey: "cmd+enter"},       // 名前一致
+			{App: "com.apple.Notes", SendKey: "none"},  // bundle id 一致 + 無送信(このアプリだけ off)
+			{App: " Cosense ", SendKey: "shift+enter"}, // 前後空白
+			{App: "Listed", SendKey: ""},               // app 一致だが未指定 → 既定へ
 		},
 	}
-
 	cases := []struct {
-		name     string
-		appName  string
-		bundleID string
-		want     string
+		name, appName, bundleID, want string
 	}{
-		{"名前一致 enter", "Slack", "com.tinyspeck.slackmacgap", "enter"},
-		{"名前は大文字小文字無視", "slack", "", "enter"},
-		{"bundle id 一致 cmd+enter", "Google Chrome", "com.google.Chrome", "cmd+enter"},
-		{"空白入り指定 shift+enter", "Notion", "notion.id", "shift+enter"},
-		{"override に app はあるが send_key 未指定 → 既定 none", "Listed", "", "none"},
-		{"一致なしは既定 none", "TextEdit", "com.apple.TextEdit", "none"},
+		{"一致なしは既定 enter", "TextEdit", "com.apple.TextEdit", "enter"},
+		{"override enter→cmd+enter", "Slack", "com.tinyspeck.slackmacgap", "cmd+enter"},
+		{"名前は大小無視", "slack", "", "cmd+enter"},
+		{"bundle id 一致で none(このアプリだけ無送信)", "Notes", "com.apple.Notes", "none"},
+		{"空白入り shift+enter", "Cosense", "", "shift+enter"},
+		{"override 未指定は全体既定 enter", "Listed", "", "enter"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -37,21 +51,21 @@ func TestSendKeyFor(t *testing.T) {
 }
 
 func TestSendKeyForDefaults(t *testing.T) {
-	// 既定 send_key が auto_enter より優先される。
+	// auto_enter=true + 全体 send_key。
 	if got := (KeystrokeConfig{AutoEnter: true, SendKey: "cmd+enter"}).SendKeyFor("X", ""); got != "cmd+enter" {
-		t.Errorf("既定 send_key を使うべき: got %q", got)
+		t.Errorf("全体 send_key を使うべき: got %q", got)
 	}
-	// send_key 未指定なら auto_enter=true → enter。
+	// auto_enter=true, send_key 未指定 → enter。
 	if got := (KeystrokeConfig{AutoEnter: true}).SendKeyFor("X", ""); got != "enter" {
-		t.Errorf("auto_enter=true は enter にフォールバックすべき: got %q", got)
+		t.Errorf("既定は enter: got %q", got)
 	}
-	// auto_enter=false で何も無ければ none。
-	if got := (KeystrokeConfig{}).SendKeyFor("X", ""); got != "none" {
-		t.Errorf("既定は none: got %q", got)
+	// auto_enter=false → none。
+	if got := (KeystrokeConfig{AutoEnter: false, SendKey: "enter"}).SendKeyFor("X", ""); got != "none" {
+		t.Errorf("auto_enter=false は none: got %q", got)
 	}
-	// 不明トークンは無視して既定へ。
+	// 不明トークンは無視 → 既定 enter(auto_enter=true)。
 	if got := (KeystrokeConfig{SendKey: "banana", AutoEnter: true}).SendKeyFor("X", ""); got != "enter" {
-		t.Errorf("不明な send_key は auto_enter にフォールバックすべき: got %q", got)
+		t.Errorf("不明な send_key は既定 enter にフォールバックすべき: got %q", got)
 	}
 }
 

@@ -1,37 +1,116 @@
 {
-  "output": "keystroke",
-  "keystroke": {
-    "auto_enter": false,
-    "send_key": "enter",
-    "pin_target": false,
-    "overrides": [
-      { "app": "Slack", "send_key": "enter" },
-      { "app": "com.google.Chrome", "send_key": "cmd+enter" }
-    ]
-  },
-  "slack_client_id": "1234567890.1234567890",
-  "slack_client_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "slack_channel": "C0123456789",
-  "oauth_redirect_port": 53682,
-  "whisper_bin": "/opt/homebrew/bin/whisper-cli",
-  "whisper_model": "~/.config/ura-talk/models/ggml-large-v3-turbo.bin",
-  "input_device": "MacBook",
-  "language": "ja",
-  "gain": { "enabled": true, "target_peak": 0.95, "max_gain": 12 },
-  "whisper_prompt": "会議での相槌やコメント。なるほど、確かに、それいいですね、賛成です。",
-  "whisper_beam_size": 5,
-  "whisper_no_speech_thold": 0.6,
-  "enhance": { "enabled": false, "backend": "ollama", "endpoint": "http://localhost:11434", "model": "qwen2.5:7b", "prompt": "" },
-  "listen_mode": "vad",
-  "vad": {
-    "threshold": 0.01,
-    "min_speech_ms": 300,
-    "silence_ms": 700,
-    "max_segment_ms": 15000,
-    "preroll_ms": 300
-  },
-  "hotkey": { "mods": [], "key": "rightcmd" },
-  "sound": { "enabled": true, "on": "Submarine", "off": "Bottle" },
-  "min_duration_ms": 300,
-  "message_prefix": "🗣 "
+    //-------------------------------------------------------------------
+    // Output
+    //-------------------------------------------------------------------
+    // "keystroke" = フォーカス中のフィールドへ貼り付け(チャット/エディタ何でも)
+    // "slack"     = Slack に自分名義で投稿(要 login。フォーカス不要)
+    "output": "keystroke",
+
+    //-------------------------------------------------------------------
+    // Output: keystroke
+    //-------------------------------------------------------------------
+    "keystroke": {
+        // 貼り付け後にキーを送るかの最上位スイッチ。
+        // false = 貼るだけ(send_key / overrides は無視)。true のときだけ下の設定が効く。
+        "auto_enter": true,
+        // auto_enter=true のとき送るキー: enter / shift+enter / cmd+enter / none。
+        // 空なら enter。アプリ別に変えたいときは overrides。
+        "send_key": "enter",
+        // 貼り付け(Cmd+V)から送信キーを送るまでの待ち(ms、0 で既定 40)。
+        // 重いエディタで貼り付け確定前に送信キーが届いてしまうときに伸ばす。
+        "send_delay_ms": 0,
+        // リッスン開始時に最前面だったアプリを固定し、そのアプリが前面のときだけ貼り付ける。
+        // 別アプリが前面のときはスキップ(誤爆防止)。メニューバーに 🎯アプリ名 を表示。
+        "pin_target": true,
+        // アプリ別の送信キー上書き。app は 🎯 の表示名か bundle id(大小無視・完全一致)。
+        // bundle id は  osascript -e 'id of app "Slack"'  で調べられる。
+        // 各アプリの「送信」設定に合わせる(例: ⌘+Enter で送信する Slack は cmd+enter、
+        // Notion/Cosense のリスト継続は enter)。none にすればそのアプリだけ無送信。
+        "overrides": [
+            {
+                "app": "Slack",
+                "send_key": "cmd+enter"
+            }
+        ]
+    },
+
+    //-------------------------------------------------------------------
+    // Output: slack
+    //-------------------------------------------------------------------
+    "slack_client_id": "1234567890.1234567890",
+    "slack_client_secret": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "slack_channel": "C0123456789",
+    // login の OAuth コールバックで使うローカルポート
+    "oauth_redirect_port": 53682,
+
+    //-------------------------------------------------------------------
+    // whisper.cpp
+    //-------------------------------------------------------------------
+    // whisper-cli の場所(brew install whisper-cpp)
+    "whisper_bin": "/opt/homebrew/bin/whisper-cli",
+    // ggml モデルのパス
+    "whisper_model": "~/.config/ura-talk/models/ggml-large-v3-turbo.bin",
+    // 入力デバイス名の部分一致(空なら既定デバイス)
+    "input_device": "MacBook",
+    "language": "ja",
+    // 自動ゲイン: 小声を持ち上げてから whisper に渡す
+    "gain": {
+        "enabled": true,
+        "target_peak": 0.95,
+        "max_gain": 12
+    },
+    // 語彙のヒント(認識精度の向上)
+    "whisper_prompt": "会議での相槌やコメント。なるほど、確かに、それいいですね、賛成です。",
+    "whisper_beam_size": 5,
+    // 無音判定のしきい値(上げると幻聴が減る)
+    "whisper_no_speech_thold": 0.6,
+
+    //-------------------------------------------------------------------
+    // Local LLM (Ollama)
+    //-------------------------------------------------------------------
+    // enabled: true で文字起こし結果を読みやすく整形(失敗時は素のテキスト)
+    "enhance": {
+        "enabled": false,
+        "backend": "ollama",
+        "endpoint": "http://localhost:11434",
+        "model": "qwen2.5:7b",
+        "prompt": ""
+    },
+
+    //-------------------------------------------------------------------
+    // Input
+    //-------------------------------------------------------------------
+    // "vad" = 無音で自動区切り(右⌘でトグル)/ "ptt" = 押している間だけ録音
+    "listen_mode": "vad",
+    "vad": {
+        // 音声検出のしきい値(URATALK_DEBUG=1 で rms= を見て調整)
+        "threshold": 0.01,
+        // これより短い音は発話と見なさない
+        "min_speech_ms": 300,
+        // この長さの無音で 1 発話を区切る
+        "silence_ms": 700,
+        // 1 発話の最大長(これを超えたら強制区切り)
+        "max_segment_ms": 15000,
+        // 発話頭の取りこぼし防止に遡って含める長さ
+        "preroll_ms": 300
+    },
+
+    //-------------------------------------------------------------------
+    // HotKey / Sound / Misc
+    //-------------------------------------------------------------------
+    // 単体修飾キー(rightcmd 等)か mods+key
+    "hotkey": {
+        "mods": [],
+        "key": "rightcmd"
+    },
+    // 開始/停止の効果音(/System/Library/Sounds の名前)
+    "sound": {
+        "enabled": true,
+        "on": "Submarine",
+        "off": "Bottle"
+    },
+    // これより短い録音は捨てる
+    "min_duration_ms": 300,
+    // 投稿本文の接頭辞(output: "slack" のときだけ付く)
+    "message_prefix": "🗣 "
 }

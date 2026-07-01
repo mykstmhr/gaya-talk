@@ -33,14 +33,15 @@ static int promptTrust() {
 }
 
 // sendKey は key を flags(修飾キーのマスク)付きで合成送出する。flags=0 なら修飾なし。
+// flags は常に明示設定する。設定しないと HID のハードウェア修飾状態(直前の Cmd や
+// ホットキーの残り)を引き継ぎ、素の Enter が ⌘/⇧+Enter と誤解釈されてしまう
+// (Notion/Cosense でリスト継続にならない原因)。
 static void sendKey(CGKeyCode key, CGEventFlags flags) {
     CGEventSourceRef src = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
     CGEventRef down = CGEventCreateKeyboardEvent(src, key, true);
     CGEventRef up   = CGEventCreateKeyboardEvent(src, key, false);
-    if (flags) {
-        CGEventSetFlags(down, flags);
-        CGEventSetFlags(up,   flags);
-    }
+    CGEventSetFlags(down, flags); // 0 でも明示的に設定し、余計な修飾を確実に外す
+    CGEventSetFlags(up,   flags);
     CGEventPost(kCGHIDEventTap, down);
     CGEventPost(kCGHIDEventTap, up);
     CFRelease(down);
@@ -144,9 +145,14 @@ func postKeyFor(sendKey string) (send bool, key C.CGKeyCode, flags C.CGEventFlag
 	}
 }
 
+// defaultSendDelayMs は貼り付けから送信キーまでの既定待ち時間。
+const defaultSendDelayMs = 40
+
 // Inject はフォーカス中のフィールドへ text を貼り付け、sendKey で指定された送信キーを続けて送る。
 // sendKey は none|enter|shift+enter|cmd+enter(none は貼り付けのみ)。
-func Inject(text string, sendKey string) error {
+// sendDelayMs は貼り付けから送信キーまでの待ち(0 以下で既定)。ブラウザ製エディタでは
+// ペースト確定前に Enter が届くとリスト継続にならないため、長めが要ることがある。
+func Inject(text string, sendKey string, sendDelayMs int) error {
 	if text == "" {
 		return nil
 	}
@@ -161,7 +167,11 @@ func Inject(text string, sendKey string) error {
 	C.sendKey(C.CGKeyCode(keyV), C.kCGEventFlagMaskCommand) // Cmd+V
 
 	if send, key, flags := postKeyFor(sendKey); send {
-		time.Sleep(40 * time.Millisecond)
+		delay := sendDelayMs
+		if delay <= 0 {
+			delay = defaultSendDelayMs
+		}
+		time.Sleep(time.Duration(delay) * time.Millisecond)
 		C.sendKey(key, flags)
 	}
 

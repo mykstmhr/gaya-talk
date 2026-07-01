@@ -68,18 +68,19 @@ make app-open              # .app をビルドして起動。初回はマイク/
 >
 > ※ 「裏に回ったアプリへ無理やり入力する」ことは macOS の制約(バックグラウンドアプリは前面でないと合成貼り付けを受け付けない)上できないため、固定モードは "ターゲット以外には入れない安全弁" として動く。
 
-> **送信キーをアプリ別に変える(`keystroke.send_key` / `overrides`)**: 貼り付け後に送る「送信キー」はアプリによって作法が違う(チャットは `Enter` 送信、別アプリは `Cmd+Enter`、ドキュメントは `Enter` で改行、等)。`send_key` で指定する。値は `none`(貼るだけ) / `enter` / `shift+enter` / `cmd+enter`。
+> **送信キーをアプリ別に変える(`keystroke.auto_enter` / `send_key` / `overrides`)**: 送信の作法はアプリによって違う(チャットは `Enter` 送信、`⌘+Enter` 送信のアプリ、ドキュメントは `Enter` で改行、等)。まず **`auto_enter` が最上位スイッチ**で、`false` なら何も送らない(貼るだけ)。`true` のとき、送るキーを **`send_key`**(既定 `enter`)で決め、**`overrides`** でアプリ別に上書きする。値は `enter` / `shift+enter` / `cmd+enter` / `none`。
 > ```json
 > "keystroke": {
->   "send_key": "none",
+>   "auto_enter": true,      // 送る(false なら何もしない)
+>   "send_key": "enter",     // 既定はエンター
 >   "overrides": [
->     { "app": "Slack", "send_key": "enter" },               // Enter で送信
->     { "app": "com.google.Chrome", "send_key": "cmd+enter" },// このアプリは Cmd+Enter で送信(bundle id 指定)
->     { "app": "Notion", "send_key": "enter" }                // ドキュメントは Enter=改行
+>     { "app": "Slack", "send_key": "cmd+enter" }, // Slack は ⌘+Enter で送信(送信設定に合わせる)
+>     { "app": "Notion", "send_key": "enter" },    // ドキュメントは Enter=改行/リスト継続
+>     { "app": "Xcode", "send_key": "none" }        // このアプリだけ何も送らない
 >   ]
 > }
 > ```
-> 解決の優先順は **一致する override の `send_key` → 全体の `send_key` → `auto_enter`(後方互換: `true`=`enter` / `false`=`none`)**。`app` は**メニューバーに出る 🎯 の表示名**(例 `Slack`)か **bundle id**(例 `com.google.Chrome`)で、大文字小文字は無視・完全一致。bundle id は `osascript -e 'id of app "Slack"'` で調べられる。固定モードでなくても(前面アプリ判定で)効く。`auto_enter` だけ書けば従来どおり(`true`=毎回 Enter)。
+> 解決順: **`auto_enter: false` → 常に `none`。`true` のときだけ 既定 `enter` → 全体 `send_key` → 一致する override の `send_key`** の順で上書き。`app` は**メニューバーに出る 🎯 の表示名**(例 `Slack`)か **bundle id**(例 `com.google.Chrome`)で、大文字小文字は無視・完全一致。bundle id は `osascript -e 'id of app "Slack"'` で調べられる。固定モードでなくても(前面アプリ判定で)効く。
 
 ### 入力方式: PTT と VAD
 
@@ -164,6 +165,8 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 
 ## 設定 (config.json)
 
+**コメントを書ける**(JSONC)。`//` 行コメント・`/* */` ブロックコメント・末尾カンマを許可するので、`config.json` に直接メモを残せる(`make setup` が配置する `config.example.json` 自体が各項目コメント付きなので、まずはそれを見れば README なしでも分かる)。
+
 環境変数 `URATALK_SLACK_CLIENT_SECRET` / `URATALK_WHISPER_MODEL` / `URATALK_CONFIG` で上書き可能。
 
 <details>
@@ -172,8 +175,9 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | キー | 説明 | 既定 |
 |---|---|---|
 | `output` | 出力先。`slack`(自分名義で投稿) / `keystroke`(フォーカス中のUIへ入力) | `slack` |
-| `keystroke.auto_enter` | 貼り付け後に Enter を送るか(後方互換。`send_key` 未指定時の既定: `true`=`enter` / `false`=`none`) | `false` |
-| `keystroke.send_key` | 貼り付け後に送る送信キーの既定。`none` / `enter` / `shift+enter` / `cmd+enter`(空なら `auto_enter` を使用) | `""` |
+| `keystroke.auto_enter` | 貼り付け後にキーを送るかの**最上位スイッチ**。`false` なら何も送らない(`send_key`/`overrides` も無視) | `false` |
+| `keystroke.send_key` | `auto_enter: true` のとき送るキー。`enter` / `shift+enter` / `cmd+enter` / `none`(空なら `enter`) | `""` |
+| `keystroke.send_delay_ms` | 貼り付け(Cmd+V)から送信キーを送るまでの待ち(ms)。Notion/Cosense 等でリスト継続にならないなら `200`〜`300` に上げる。0 で既定(40ms) | `0` |
 | `keystroke.pin_target` | リッスン開始時に最前面だったアプリを固定し、**そのアプリが前面のときだけ**貼り付ける(別アプリ前面時はスキップ=誤爆防止)。`false` は従来どおり最前面へ貼り付け | `false` |
 | `keystroke.overrides` | アプリ別の送信キー上書き。`[{ "app": "Slack", "send_key": "enter" }]` の形。`app` は 🎯 表示名か bundle id(大文字小文字無視・完全一致) | `[]` |
 | `slack_client_id` | Slack アプリの Client ID | (slack 出力の login に必須) |
