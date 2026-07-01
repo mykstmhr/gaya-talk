@@ -199,7 +199,7 @@ func Load() (*Config, error) {
 		ListenMode:        "ptt",
 		WhisperBeamSize:   5,
 		Gain:              GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
-		Enhance:           EnhanceConfig{Enabled: false, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
+		Enhance:           EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
 		Hotkey:            Hotkey{Mods: nil, Key: "rightcmd"},
 		Sound:             SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
 		VAD: VADConfig{

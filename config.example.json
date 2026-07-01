@@ -70,7 +70,7 @@
     //-------------------------------------------------------------------
     // enabled: true で文字起こし結果を読みやすく整形(失敗時は素のテキスト)
     "enhance": {
-        "enabled": false,
+        "enabled": true,
         "backend": "ollama",
         "endpoint": "http://localhost:11434",
         "model": "qwen2.5:7b",

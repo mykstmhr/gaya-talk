@@ -194,7 +194,7 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | `whisper_prompt` | 初期プロンプト。口語・語彙のヒントを与え誤認識を減らす | (なし) |
 | `whisper_beam_size` | ビーム幅。上げると精度↑・速度↓ | `5` |
 | `whisper_no_speech_thold` | no-speech 閾値(0で既定0.6)。下げると小声を拾うが幻聴増 | `0`(=0.6) |
-| `enhance.enabled` | 文字起こしをローカル LLM(Ollama)で整形するか | `false` |
+| `enhance.enabled` | 文字起こしをローカル LLM(Ollama)で整形するか | `true` |
 | `enhance.model` | 整形に使う Ollama モデル(例 `qwen2.5:7b` / `qwen2.5:3b`) | `qwen2.5:7b` |
 | `enhance.endpoint` | Ollama エンドポイント | `http://localhost:11434` |
 | `enhance.prompt` | 整形プロンプト(空で既定の「整形のみ・翻訳/加筆禁止」) | (既定) |
