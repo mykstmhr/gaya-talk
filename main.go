@@ -774,28 +774,83 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	}
 
 	listening := false
+	focusLost := make(chan struct{}, 1) // 監視 goroutine → 固定先が前面から外れた通知
+	var watchStop chan struct{}         // 監視 goroutine の停止チャネル(nil=監視なし)
+
+	// stopListening はリッスンを止めて待機へ戻す(手動キー・フォーカス変化の両方から呼ぶ)。
+	stopListening := func() {
+		rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
+		seg.Flush()
+		listening = false
+		if watchStop != nil {
+			close(watchStop)
+			watchStop = nil
+		}
+		setPinLabel(idlePinLabel(cfg)) // 固定先表示は待機へ(判定用 pinnedTarget は残す)
+		tray.setBase(iconIdle, "待機中…")
+		playOff(cfg)
+	}
+
 	for {
-		<-down
 		if !listening {
+			<-down
+			select { // 前回の取りこぼし通知が残っていれば捨てる
+			case <-focusLost:
+			default:
+			}
 			if err := rec.StartStream(seg.Feed); err != nil {
 				log.Printf("リッスン開始失敗: %v", err)
 				continue
 			}
 			listening = true
-			capturePinTarget(cfg) // 固定先を記憶(タイトル/ドロップダウンにも反映)
+			capturePinTarget(cfg)                       // 固定先を記憶(タイトル/ドロップダウンにも反映)
+			watchStop = startFocusWatch(cfg, focusLost) // 固定モードなら前面監視を開始
 			log.Println("🎙 リッスン開始(話すと自動で区切って投稿。もう一度キーで停止)")
 			tray.setBase(iconListen, "リッスン中(無音待ち)…")
 			playOn(cfg)
-		} else {
-			rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
-			seg.Flush()
-			listening = false
-			setPinLabel(idlePinLabel(cfg)) // 待機に戻ったら固定先表示は --- に(判定用 pinnedTarget は残す)
+			continue
+		}
+		select {
+		case <-down: // 手動でトグル停止
 			log.Println("■ リッスン停止")
-			tray.setBase(iconIdle, "待機中…")
-			playOff(cfg)
+			stopListening()
+		case <-focusLost: // 固定先から離れたので自動停止(安全側)
+			log.Println("■ フォーカスが固定先から外れたためリッスンを停止しました(再度キーで再開)")
+			stopListening()
 		}
 	}
+}
+
+// startFocusWatch は固定モードのとき、最前面が固定先 PID から外れたら focusLost に通知する
+// 監視 goroutine を起動し、その停止チャネルを返す。固定モードでない/対象未取得なら nil。
+func startFocusWatch(cfg *config.Config, focusLost chan struct{}) chan struct{} {
+	if cfg.Output != "keystroke" || !cfg.Keystroke.PinTarget {
+		return nil
+	}
+	target := pinnedSnapshot()
+	if target.PID <= 0 {
+		return nil // 対象が取れていない(従来どおり最前面へ)なら監視しない
+	}
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(250 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				if keystroke.FrontmostPID() != target.PID {
+					select {
+					case focusLost <- struct{}{}:
+					default:
+					}
+					return
+				}
+			}
+		}
+	}()
+	return stop
 }
 
 // handle は 1 回の発話(PCM)を正規化・文字起こしして出力先へ渡す。

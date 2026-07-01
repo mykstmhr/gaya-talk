@@ -125,6 +125,12 @@ func CaptureFrontmost() Target {
 	return t
 }
 
+// FrontmostPID は今最前面のアプリの PID を返す(取れなければ 0)。
+// 固定モードで「フォーカスが対象から外れたか」を軽量に監視するのに使う(名前は引かない)。
+func FrontmostPID() int {
+	return int(C.frontmostPID())
+}
+
 // injectMu はクリップボード退避→上書き→Cmd+V→復元の一連を直列化する。
 // 発話ごとに handle が並行起動されるため(特に VAD)、同時実行でクリップボードが
 // 交錯して誤テキストの貼り付けや復元失敗が起きるのを防ぐ。
