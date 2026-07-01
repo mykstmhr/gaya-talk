@@ -35,6 +35,7 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/slack"
 	"github.com/mykstmhr/ura-talk/internal/tokenstore"
 	"github.com/mykstmhr/ura-talk/internal/transcribe"
+	"github.com/mykstmhr/ura-talk/internal/trayicon"
 	"github.com/mykstmhr/ura-talk/internal/vad"
 
 	"fyne.io/systray"
@@ -253,24 +254,34 @@ var (
 	pinnedTarget keystroke.Target
 )
 
-// capturePinTarget はリッスン/録音の開始時に最前面アプリを固定先として記憶し、表示名を返す。
-// 固定モードでない、または取得できなければ空文字を返す(従来どおり最前面へ貼り付ける)。
-func capturePinTarget(cfg *config.Config) string {
+// capturePinTarget はリッスン/録音の開始時に最前面アプリを固定先として記憶し、
+// メニューバー(タイトル/ドロップダウン)にも反映する。固定モードでなければ何もしない。
+func capturePinTarget(cfg *config.Config) {
 	if cfg.Output != "keystroke" || !cfg.Keystroke.PinTarget {
-		return ""
+		return
 	}
 	t := keystroke.CaptureFrontmost()
 	pinMu.Lock()
 	pinnedTarget = t
 	pinMu.Unlock()
 	if t.PID <= 0 {
-		setPinLabel("")
+		setPinLabel(idlePinPlaceholder)
 		log.Println("⚠️ 固定先アプリを取得できませんでした。最前面へ貼り付けます。")
-		return ""
+		return
 	}
 	setPinLabel(t.Name)
-	log.Printf("🎯 貼り付け先を「%s」に固定しました。", t.Name)
-	return t.Name
+	log.Printf("📍 貼り付け先を「%s」に固定しました。", t.Name)
+}
+
+// idlePinPlaceholder は固定モードで待機中(まだ arm していない)に 📍 の後ろへ出す表示。
+const idlePinPlaceholder = "(No target)"
+
+// idlePinLabel は固定モードなら待機時のプレースホルダ、そうでなければ空(📍 を出さない)を返す。
+func idlePinLabel(cfg *config.Config) string {
+	if cfg.Output == "keystroke" && cfg.Keystroke.PinTarget {
+		return idlePinPlaceholder
+	}
+	return ""
 }
 
 // pinnedSnapshot は現在の固定先アプリを返す(出力 goroutine から安全に読むため)。
@@ -280,8 +291,11 @@ func pinnedSnapshot() keystroke.Target {
 	return pinnedTarget
 }
 
-// mStatus はメニューバーの状態表示メニュー項目。
-var mStatus *systray.MenuItem
+// mStatus は状態表示、mPin は固定先(📍)表示のドロップダウン項目。
+var (
+	mStatus *systray.MenuItem
+	mPin    *systray.MenuItem
+)
 
 // enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化。
 var enhancer *enhance.Enhancer
@@ -300,11 +314,15 @@ func startTray(dryRun bool) {
 // onReady はメニューバーアイコンとメニューを用意し、本体処理を別 goroutine で開始する。
 func onReady(dryRun bool) func() {
 	return func() {
-		systray.SetTitle("🎙")
+		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
 		systray.SetTooltip("ura-talk")
 
 		mStatus = systray.AddMenuItem("起動中…", "現在の状態")
 		mStatus.Disable()
+		mPin = systray.AddMenuItem("", "固定先")
+		mPin.Disable()
+		mPin.SetTemplateIcon(trayicon.Pin, trayicon.Pin)
+		mPin.Hide()
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
 		go func() {
@@ -316,29 +334,40 @@ func onReady(dryRun bool) func() {
 	}
 }
 
-// pinLabel はメニューバーのタイトルに常時併記する固定先アプリ名(空なら併記しない)。
-// gate 判定に使う pinnedTarget とは独立した「表示専用」の値。リッスン中だけ出す。
+// iconState はメニューバーに出す状態アイコンの種別。
+type iconState int
+
+const (
+	iconIdle       iconState = iota // 待機(一時停止)
+	iconListen                      // リッスン中(マイク)
+	iconRec                         // 録音/音声検出中(赤・点滅)
+	iconTranscribe                  // 文字起こし中(吹き出し)
+)
+
+// pinLabel はメニューバーのタイトルに併記する固定先アプリ名(空なら併記しない)。
+// gate 判定に使う pinnedTarget とは独立した「表示専用」の値。
 var (
 	pinLabelMu sync.Mutex
 	pinLabel   string
 )
 
-// setPinLabel はタイトルに併記する固定先名を差し替える(空で消す)。
+// setPinLabel はタイトルに併記する固定先名を差し替え、ドロップダウンのピン項目も更新する。
 func setPinLabel(name string) {
 	pinLabelMu.Lock()
 	pinLabel = name
 	pinLabelMu.Unlock()
+	updatePinMenu(name)
 }
 
-// titleWithPin は emoji に固定先(あれば 🎯名前)を併記したメニューバータイトルを作る。
-func titleWithPin(emoji string) string {
+// pinTitle は現在の固定先アプリ名(長すぎは丸める)。未設定なら空。アイコンとの間に余白を足す。
+func pinTitle() string {
 	pinLabelMu.Lock()
 	name := pinLabel
 	pinLabelMu.Unlock()
 	if name == "" {
-		return emoji
+		return ""
 	}
-	return emoji + " 🎯" + truncRunes(name, 16)
+	return " 📍" + truncRunes(name, 16) // バーにも固定マーカーを出す
 }
 
 // truncRunes は menubar が長くなりすぎないよう name を max 文字に丸める(超過分は …)。
@@ -350,41 +379,124 @@ func truncRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// setState はメニューバーのアイコン(emoji)と状態テキストを更新する。
-func setState(emoji, text string) {
-	systray.SetTitle(titleWithPin(emoji))
+// updatePinMenu はドロップダウンの固定先項目(📍)を更新する(未固定なら隠す)。
+func updatePinMenu(name string) {
+	if mPin == nil {
+		return
+	}
+	switch name {
+	case "":
+		mPin.Hide() // 固定モード off
+	case idlePinPlaceholder:
+		mPin.SetTitle("固定先: なし")
+		mPin.Show()
+	default:
+		mPin.SetTitle("固定先: " + name)
+		mPin.Show()
+	}
+}
+
+// setState は状態アイコンと、タイトル(固定先名)・ドロップダウンの状態テキストを更新する。
+func setState(state iconState, text string) {
+	applyIcon(state)
+	systray.SetTitle(pinTitle())
 	if mStatus != nil {
 		mStatus.SetTitle(text)
 	}
 }
 
-// tray は「基本状態(待機/リッスン/音声検出中)」と、それに重ねる「文字起こし中」表示を管理する。
-// 文字起こしは別 goroutine で並行しうるので件数で数え、0 になったら基本状態へ戻す。
-var tray = &trayStatus{base: [2]string{"🎙", "待機中…"}}
-
-type trayStatus struct {
-	mu           sync.Mutex
-	base         [2]string // 基本状態(emoji, text)
-	transcribing int       // 進行中の文字起こし数
-}
-
-// setBase は基本状態を更新する。文字起こし中(💬表示中)は表示を上書きしない。
-func (t *trayStatus) setBase(emoji, text string) {
-	t.mu.Lock()
-	t.base = [2]string{emoji, text}
-	show := t.transcribing == 0
-	t.mu.Unlock()
-	if show {
-		setState(emoji, text)
+// applyIcon は状態に応じてメニューバーアイコンを差し替える。録音中だけ赤の点滅にする。
+func applyIcon(state iconState) {
+	if state == iconRec {
+		startBlink()
+		return
+	}
+	stopBlink()
+	switch state {
+	case iconListen:
+		systray.SetTemplateIcon(trayicon.Listen, trayicon.Listen)
+	case iconTranscribe:
+		systray.SetTemplateIcon(trayicon.Transcribe, trayicon.Transcribe)
+	default: // iconIdle
+		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
 	}
 }
 
-// beginTranscribe は「💬 文字起こし中」を表示する。
+// blink は録音中の赤丸点滅(● ⇄ ○)を制御する goroutine のスイッチ。
+var (
+	blinkMu   sync.Mutex
+	blinkStop chan struct{}
+)
+
+// startBlink は録音中の点滅を開始する(多重起動しない)。rec はカラーなので SetIcon を使う。
+func startBlink() {
+	blinkMu.Lock()
+	defer blinkMu.Unlock()
+	if blinkStop != nil {
+		return
+	}
+	stop := make(chan struct{})
+	blinkStop = stop
+	systray.SetIcon(trayicon.Rec) // まず点灯
+	go func() {
+		on := true
+		t := time.NewTicker(500 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				on = !on
+				if on {
+					systray.SetIcon(trayicon.Rec)
+				} else {
+					systray.SetIcon(trayicon.RecRing)
+				}
+			}
+		}
+	}()
+}
+
+// stopBlink は点滅を止める。
+func stopBlink() {
+	blinkMu.Lock()
+	defer blinkMu.Unlock()
+	if blinkStop != nil {
+		close(blinkStop)
+		blinkStop = nil
+	}
+}
+
+// tray は「基本状態(待機/リッスン/録音)」と、それに重ねる「文字起こし中」表示を管理する。
+// 文字起こしは別 goroutine で並行しうるので件数で数え、0 になったら基本状態へ戻す。
+var tray = &trayStatus{baseIcon: iconIdle, baseText: "待機中…"}
+
+type trayStatus struct {
+	mu           sync.Mutex
+	baseIcon     iconState
+	baseText     string
+	transcribing int
+}
+
+// setBase は基本状態を更新する。文字起こし中(💬表示中)は表示を上書きしない。
+func (t *trayStatus) setBase(state iconState, text string) {
+	t.mu.Lock()
+	t.baseIcon = state
+	t.baseText = text
+	show := t.transcribing == 0
+	t.mu.Unlock()
+	if show {
+		setState(state, text)
+	}
+}
+
+// beginTranscribe は「文字起こし中」を表示する。
 func (t *trayStatus) beginTranscribe() {
 	t.mu.Lock()
 	t.transcribing++
 	t.mu.Unlock()
-	setState("💬", "文字起こし中…")
+	setState(iconTranscribe, "文字起こし中…")
 }
 
 // endTranscribe は文字起こし完了を反映し、全て終わったら基本状態へ戻す。
@@ -394,10 +506,10 @@ func (t *trayStatus) endTranscribe() {
 		t.transcribing--
 	}
 	done := t.transcribing == 0
-	emoji, text := t.base[0], t.base[1]
+	s, txt := t.baseIcon, t.baseText
 	t.mu.Unlock()
 	if done {
-		setState(emoji, text)
+		setState(s, txt)
 	}
 }
 
@@ -500,16 +612,17 @@ func serve(dryRun bool) {
 	if dryRun {
 		dst = "ドライラン(出力しません)"
 	}
+	setPinLabel(idlePinLabel(cfg)) // 固定モードなら起動時から 🎯--- を出す(未 arm)
 
 	if cfg.ListenMode == "vad" {
 		log.Printf("ura-talk 起動 [%s / VAD]。[%s] でリッスン開始/停止。話すと無音で自動区切りして出力します。", dst, cfg.Hotkey)
-		tray.setBase("🎙", fmt.Sprintf("待機中 (%s/VAD) — %s でリッスン", dst, cfg.Hotkey))
+		tray.setBase(iconIdle, fmt.Sprintf("待機中 (%s/VAD) — %s でリッスン", dst, cfg.Hotkey))
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
 	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", dst, cfg.Hotkey)
-	tray.setBase("🎙", fmt.Sprintf("待機中 (%s/PTT) — %s で録音", dst, cfg.Hotkey))
+	tray.setBase(iconIdle, fmt.Sprintf("待機中 (%s/PTT) — %s で録音", dst, cfg.Hotkey))
 	pttLoop(rec, wh, out, cfg, down, up)
 }
 
@@ -597,18 +710,6 @@ func playSound(name string) {
 	go func() { _ = cmd.Wait() }()
 }
 
-// withPin は固定先アプリ名があれば「→ アプリ名」を末尾に足す(メニューバー表示用)。
-func withPin(base, pinned string) string {
-	if pinned == "" {
-		return base
-	}
-	return base + " → 🎯" + pinned
-}
-
-// listenBaseText / recBaseText はリッスン中・録音中の状態テキスト(固定先があれば併記)。
-func listenBaseText(pinned string) string { return withPin("リッスン中(無音待ち)…", pinned) }
-func recBaseText(pinned string) string    { return withPin("● 録音中…", pinned) }
-
 // pttLoop は push-to-talk:押している間だけ録音し、離したら 1 回出力する。
 func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down, up <-chan struct{}) {
 	for {
@@ -617,14 +718,15 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			log.Printf("録音開始失敗: %v", err)
 			continue
 		}
-		pinned := capturePinTarget(cfg)
+		capturePinTarget(cfg) // 固定先を記憶(タイトル/ドロップダウンにも反映)
 		log.Println("● 録音中...")
-		tray.setBase("🔴", recBaseText(pinned))
+		tray.setBase(iconRec, "● 録音中…")
 		playOn(cfg)
 
 		<-up
 		pcm, durMs, err := rec.Stop()
-		tray.setBase("🎙", "待機中…") // タイトルの 🎯 はそのまま残す
+		setPinLabel(idlePinLabel(cfg)) // 待機に戻ったら固定先表示は --- に(判定用 pinnedTarget は残す)
+		tray.setBase(iconIdle, "待機中…")
 		playOff(cfg)
 		if err != nil {
 			log.Printf("録音停止失敗: %v", err)
@@ -658,15 +760,12 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		go handle(wh, out, cfg, pcm)
 	})
 
-	// pinned は固定先アプリ名(固定モードのみ)。OnActivity と開始/停止で共有しアイコン表示に出す。
-	var pinned string
-
 	// 発話の検出/終了をアイコンに反映する(リッスン中のみ意味を持つ)。
 	seg.OnActivity = func(active bool) {
 		if active {
-			tray.setBase("🔴", withPin("● 音声検出中…", pinned))
+			tray.setBase(iconRec, "● 音声検出中…")
 		} else {
-			tray.setBase("👂", listenBaseText(pinned))
+			tray.setBase(iconListen, "リッスン中(無音待ち)…")
 		}
 	}
 
@@ -679,16 +778,17 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 				continue
 			}
 			listening = true
-			pinned = capturePinTarget(cfg)
+			capturePinTarget(cfg) // 固定先を記憶(タイトル/ドロップダウンにも反映)
 			log.Println("🎙 リッスン開始(話すと自動で区切って投稿。もう一度キーで停止)")
-			tray.setBase("👂", listenBaseText(pinned))
+			tray.setBase(iconListen, "リッスン中(無音待ち)…")
 			playOn(cfg)
 		} else {
 			rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
 			seg.Flush()
 			listening = false
+			setPinLabel(idlePinLabel(cfg)) // 待機に戻ったら固定先表示は --- に(判定用 pinnedTarget は残す)
 			log.Println("■ リッスン停止")
-			tray.setBase("🎙", "待機中…") // タイトルの 🎯 はそのまま残す(次のリッスンで取り直す)
+			tray.setBase(iconIdle, "待機中…")
 			playOff(cfg)
 		}
 	}
