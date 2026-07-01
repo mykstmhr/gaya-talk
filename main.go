@@ -546,14 +546,17 @@ func serve(dryRun bool) {
 	// 出力先(sink)を決める。dryRun は出力せず表示のみ(out.send == nil)。
 	out := buildOutput(cfg, dryRun)
 
-	// 文字起こし整形(ローカル LLM)。無効でも New は安全(Enhance がそのまま返す)。
+	// 文字起こし整形/絵文字付与(ローカル LLM)。無効でも New は安全。
 	enhancer = enhance.New(enhance.Config{
-		Enabled:  cfg.Enhance.Enabled,
-		Endpoint: cfg.Enhance.Endpoint,
-		Model:    cfg.Enhance.Model,
-		Prompt:   cfg.Enhance.Prompt,
+		Enabled:   cfg.Enhance.Enabled,
+		Endpoint:  cfg.Enhance.Endpoint,
+		Model:     cfg.Enhance.Model,
+		Prompt:    cfg.Enhance.Prompt,
+		EmojiMode: cfg.Emoji.Mode,
 	})
-	if cfg.Enhance.Enabled {
+	// 整形か絵文字のどちらかが有効なら Ollama を用意する。
+	llmNeeded := cfg.Enhance.Enabled || (cfg.Emoji.Mode != "" && cfg.Emoji.Mode != "off")
+	if llmNeeded {
 		// Ollama が起動していなければ自動起動する(出力は破棄)。
 		ictx, icancel := context.WithTimeout(context.Background(), 20*time.Second)
 		if started, err := enhancer.EnsureServer(ictx); err != nil {
@@ -565,9 +568,10 @@ func serve(dryRun bool) {
 
 		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := enhancer.Check(cctx); err != nil {
-			log.Printf("⚠️ 整形(Ollama)が使えません: %v → 生テキストのまま出力します", err)
+			log.Printf("⚠️ Ollama が使えません: %v → 整形/絵文字はスキップします", err)
 		} else {
-			log.Printf("✅ 整形(Ollama)有効: model=%s endpoint=%s", cfg.Enhance.Model, cfg.Enhance.Endpoint)
+			log.Printf("✅ Ollama 有効: model=%s endpoint=%s(整形=%v / 絵文字=%s)",
+				cfg.Enhance.Model, cfg.Enhance.Endpoint, cfg.Enhance.Enabled, cfg.Emoji.Mode)
 			// モデルを先読みして初回のコールドスタート待ちを無くす(バックグラウンド)。
 			go func() {
 				wctx, wcancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -831,6 +835,20 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 		text = enhanced
 		if strings.TrimSpace(text) == "" {
 			return
+		}
+	}
+
+	// 絵文字モード: 本文は変えず、内容に合う絵文字を末尾に付ける(off なら何もしない)。
+	if cfg.Emoji.Mode != "" && cfg.Emoji.Mode != "off" {
+		emctx, emcancel := context.WithTimeout(context.Background(), 15*time.Second)
+		em, eerr := enhancer.Emoji(emctx, text)
+		emcancel()
+		switch {
+		case eerr != nil:
+			log.Printf("絵文字付与スキップ: %v", eerr)
+		case em != "":
+			log.Printf("絵文字 %s を付与", em)
+			text = enhance.AppendEmoji(text, em)
 		}
 	}
 

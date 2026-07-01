@@ -47,6 +47,7 @@ type Config struct {
 	WhisperNoSpeechThold float64 `json:"whisper_no_speech_thold"`
 	// 文字起こし結果のローカル LLM(Ollama)整形。日本語の読みやすさ向上用。
 	Enhance EnhanceConfig `json:"enhance"`
+	Emoji   EmojiConfig   `json:"emoji"`
 	// 入力方式。"ptt"(押している間だけ録音)または "vad"(キーでリッスンを
 	// トグルし、無音で自動区切りして発話ごとに投稿)。
 	ListenMode string `json:"listen_mode"`
@@ -146,6 +147,13 @@ type EnhanceConfig struct {
 	Prompt   string `json:"prompt"`   // 整形プロンプト(空で既定)
 }
 
+// EmojiConfig は発話内容に応じて末尾に絵文字を付ける設定(本文は変えない)。
+// 絵文字の選定は enhance と同じ Ollama を使う。
+type EmojiConfig struct {
+	// Mode は付与モード: off(付けない=ビジネスライク)/ light(控えめ)/ cheerful(積極的に明るく)。
+	Mode string `json:"mode"`
+}
+
 // GainConfig は録音音声のピーク正規化(自動ゲイン)設定。
 type GainConfig struct {
 	Enabled    bool    `json:"enabled"`     // 自動ゲインを有効にするか
@@ -200,6 +208,7 @@ func Load() (*Config, error) {
 		WhisperBeamSize:   5,
 		Gain:              GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
 		Enhance:           EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
+		Emoji:             EmojiConfig{Mode: "off"},
 		Hotkey:            Hotkey{Mods: nil, Key: "rightcmd"},
 		Sound:             SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
 		VAD: VADConfig{

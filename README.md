@@ -198,6 +198,7 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | `enhance.model` | 整形に使う Ollama モデル(例 `qwen2.5:7b` / `qwen2.5:3b`) | `qwen2.5:7b` |
 | `enhance.endpoint` | Ollama エンドポイント | `http://localhost:11434` |
 | `enhance.prompt` | 整形プロンプト(空で既定の「整形のみ・翻訳/加筆禁止」) | (既定) |
+| `emoji.mode` | 発話内容に応じて末尾に絵文字を付ける(本文は変えない)。`off` / `light`(控えめ)/ `cheerful`(積極的)。enhance と同じ Ollama を使う | `off` |
 | `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |
 | `vad.threshold` | 発話開始とみなす音量(RMS, 0〜1)。継続は内部でこの半分の閾値で判定(ヒステリシス)。上げると鈍く、下げると過敏 | `0.01` |
 | `vad.min_speech_ms` | これ未満の発話は雑音として捨てる | `300` |

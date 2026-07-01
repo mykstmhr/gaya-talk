@@ -42,6 +42,15 @@ type Config struct {
 	Model     string // 使うモデル名(例 qwen2.5:7b)
 	Prompt    string // システムプロンプト(空なら defaultPrompt)
 	KeepAlive string // モデルをメモリに保持する時間(空なら "30m")。コールドスタート対策。
+	EmojiMode string // 末尾に絵文字を付けるモード: off|light|cheerful(off/空 は付けない)
+}
+
+// active は LLM(Ollama)を使う必要があるか(整形か絵文字のどちらかが有効)を返す。
+func (e *Enhancer) active() bool {
+	if e == nil {
+		return false
+	}
+	return e.cfg.Enabled || normalizeEmojiMode(e.cfg.EmojiMode) != "off"
 }
 
 // Enhancer は整形クライアント。
@@ -81,7 +90,7 @@ func (e *Enhancer) reachable(ctx context.Context) bool {
 // EnsureServer は Ollama が起動していなければ自動起動し、応答するまで待つ。
 // started は今回自分で起動したかどうか。無効時や既に起動済みなら何もしない。
 func (e *Enhancer) EnsureServer(ctx context.Context) (started bool, err error) {
-	if e == nil || !e.cfg.Enabled {
+	if !e.active() {
 		return false, nil
 	}
 	if e.reachable(ctx) {
@@ -138,7 +147,7 @@ func ollamaBin() string {
 
 // Warmup はモデルをメモリに先読みする(初回発話の待ちを無くす)。起動時に呼ぶ。
 func (e *Enhancer) Warmup(ctx context.Context) error {
-	if e == nil || !e.cfg.Enabled || e.cfg.Model == "" {
+	if !e.active() || e.cfg.Model == "" {
 		return nil
 	}
 	_, err := e.callOllama(ctx, "")
@@ -174,7 +183,7 @@ func tooLong(raw, out string) bool {
 // Check は Ollama に接続でき、設定モデルが存在するかを確認する。
 // 無効なら nil。起動時に呼んで使用可否をログ表示する用途。
 func (e *Enhancer) Check(ctx context.Context) error {
-	if e == nil || !e.cfg.Enabled {
+	if !e.active() {
 		return nil
 	}
 	if e.cfg.Model == "" {
@@ -222,7 +231,11 @@ func (e *Enhancer) callOllama(ctx context.Context, raw string) (string, error) {
 		)
 	}
 	messages = append(messages, map[string]string{"role": "user", "content": raw})
+	return e.postChat(ctx, messages)
+}
 
+// postChat は Ollama の /api/chat を非ストリームで呼び、assistant の本文を返す。
+func (e *Enhancer) postChat(ctx context.Context, messages []map[string]string) (string, error) {
 	payload, err := json.Marshal(map[string]any{
 		"model":      e.cfg.Model,
 		"stream":     false,
