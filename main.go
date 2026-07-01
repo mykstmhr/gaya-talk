@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -212,14 +213,14 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 		out.name = "keystroke"
 		out.send = func(_ context.Context, text string) error {
 			dest := keystroke.CaptureFrontmost() // 今まさに貼り付く先(=最前面アプリ)
-			if cfg.Keystroke.PinTarget {
+			if pinTargetOn.Load() {
 				if t := pinnedSnapshot(); t.PID > 0 && dest.PID != t.PID {
 					log.Printf("⏸ 固定先「%s」が前面にないため貼り付けをスキップしました。", t.Name)
 					return nil
 				}
 			}
 			// 貼り付け先アプリに応じて送信キーを解決(override → 既定 send_key → auto_enter)。
-			sendKey := cfg.Keystroke.SendKeyFor(dest.Name, dest.BundleID)
+			sendKey := resolveSendKey(cfg, dest.Name, dest.BundleID)
 			return keystroke.Inject(text, sendKey, cfg.Keystroke.SendDelayMs)
 		}
 		return out
@@ -244,6 +245,18 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 	}
 }
 
+// resolveSendKey は実行時の auto_enter スイッチ(autoEnterOn)を尊重して送信キーを決める。
+// autoEnter が off なら常に none。on のときは config の send_key/overrides に従う
+// (config 側の auto_enter が false でもメニューで on にできるよう、一時的に true 扱いにする)。
+func resolveSendKey(cfg *config.Config, name, bundleID string) string {
+	if !autoEnterOn.Load() {
+		return "none"
+	}
+	k := cfg.Keystroke
+	k.AutoEnter = true
+	return k.SendKeyFor(name, bundleID)
+}
+
 // lockFile は多重起動防止のロックを保持する(プロセス終了まで開いたままにする)。
 var lockFile *os.File
 
@@ -254,10 +267,18 @@ var (
 	pinnedTarget keystroke.Target
 )
 
+// pinTargetOn / autoEnterOn は keystroke 出力の「固定モード」「送信キー」スイッチの
+// 実行時の実体。起動時に config の値で初期化し、メニューバーからトグルできる。
+// 出力 goroutine とメニュー(tray)goroutine の両方から触るので atomic で保持する。
+var (
+	pinTargetOn atomic.Bool
+	autoEnterOn atomic.Bool
+)
+
 // capturePinTarget はリッスン/録音の開始時に最前面アプリを固定先として記憶し、
 // メニューバー(タイトル/ドロップダウン)にも反映する。固定モードでなければ何もしない。
 func capturePinTarget(cfg *config.Config) {
-	if cfg.Output != "keystroke" || !cfg.Keystroke.PinTarget {
+	if cfg.Output != "keystroke" || !pinTargetOn.Load() {
 		return
 	}
 	t := keystroke.CaptureFrontmost()
@@ -273,12 +294,13 @@ func capturePinTarget(cfg *config.Config) {
 	log.Printf("📍 貼り付け先を「%s」に固定しました。", t.Name)
 }
 
-// idlePinPlaceholder は固定モードで待機中(まだ arm していない)に 📍 の後ろへ出す表示。
-const idlePinPlaceholder = "(No target)"
+// idlePinPlaceholder は固定モードで待機中(まだ固定先が確定していない)ときに
+// メニューバーへ出す「未指定」マーカー。これから確定する保留状態を控えめに表す。
+const idlePinPlaceholder = "⋯"
 
 // idlePinLabel は固定モードなら待機時のプレースホルダ、そうでなければ空(📍 を出さない)を返す。
 func idlePinLabel(cfg *config.Config) string {
-	if cfg.Output == "keystroke" && cfg.Keystroke.PinTarget {
+	if cfg.Output == "keystroke" && pinTargetOn.Load() {
 		return idlePinPlaceholder
 	}
 	return ""
@@ -291,10 +313,15 @@ func pinnedSnapshot() keystroke.Target {
 	return pinnedTarget
 }
 
-// mStatus は状態表示、mPin は固定先(📍)表示のドロップダウン項目。
+// mStatus は状態(待機/聞き取り/録音…)。その下に動作情報(出力/方式/キー)を常時表示する。
+// mPinToggle / mAutoEnter は keystroke 出力時だけ出す設定トグル。
 var (
-	mStatus *systray.MenuItem
-	mPin    *systray.MenuItem
+	mStatus     *systray.MenuItem
+	mInfoOutput *systray.MenuItem
+	mInfoMode   *systray.MenuItem
+	mInfoKey    *systray.MenuItem
+	mPinToggle  *systray.MenuItem
+	mAutoEnter  *systray.MenuItem
 )
 
 // enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化。
@@ -319,10 +346,19 @@ func onReady(dryRun bool) func() {
 
 		mStatus = systray.AddMenuItem("起動中…", "現在の状態")
 		mStatus.Disable()
-		mPin = systray.AddMenuItem("", "固定先")
-		mPin.Disable()
-		mPin.SetTemplateIcon(trayicon.Pin, trayicon.Pin)
-		mPin.Hide()
+		// 動作情報(出力/方式/キー)は状態の下に常時表示。内容は serve で確定して Show する。
+		mInfoOutput = newInfoItem()
+		mInfoMode = newInfoItem()
+		mInfoKey = newInfoItem()
+
+		systray.AddSeparator()
+
+		// keystroke 出力のときだけ serve から Show して有効化する設定トグル。ON/OFF はレ点で示す。
+		mPinToggle = systray.AddMenuItemCheckbox("入力先を固定 (pin_target)", "聞き取り開始時の最前面アプリだけに貼り付ける", false)
+		mPinToggle.Hide()
+		mAutoEnter = systray.AddMenuItemCheckbox("貼り付け後に送信 (auto_enter)", "貼り付け後に Enter などの送信キーを送る", false)
+		mAutoEnter.Hide()
+
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
 		go func() {
@@ -351,12 +387,14 @@ var (
 	pinLabel   string
 )
 
-// setPinLabel はタイトルに併記する固定先名を差し替え、ドロップダウンのピン項目も更新する。
+// setPinLabel はメニューバーのタイトルに併記する固定先名を差し替える。メニューからの
+// トグルでもすぐ反映されるよう、setState を待たずここでタイトルを塗り直す。
+// 固定先はドロップダウンには出さず(メニューバーのタイトルに出るので冗長)、タイトルのみ更新する。
 func setPinLabel(name string) {
 	pinLabelMu.Lock()
 	pinLabel = name
 	pinLabelMu.Unlock()
-	updatePinMenu(name)
+	systray.SetTitle(pinTitle())
 }
 
 // pinTitle は現在の固定先アプリ名(長すぎは丸める)。未設定なら空。アイコンとの間に余白を足す。
@@ -367,7 +405,7 @@ func pinTitle() string {
 	if name == "" {
 		return ""
 	}
-	return " 📍" + truncRunes(name, 16) // バーにも固定マーカーを出す
+	return " " + truncRunes(name, 16) // 📍 は付けずアプリ名だけ併記する
 }
 
 // truncRunes は menubar が長くなりすぎないよう name を max 文字に丸める(超過分は …)。
@@ -379,20 +417,70 @@ func truncRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// updatePinMenu はドロップダウンの固定先項目(📍)を更新する(未固定なら隠す)。
-func updatePinMenu(name string) {
-	if mPin == nil {
+// newInfoItem は状態下の動作情報行(出力/方式/キー)を 1 つ作る。無効・初期は非表示。
+// 内容が確定する serve で setInfo により文言をセットして表示する。
+func newInfoItem() *systray.MenuItem {
+	it := systray.AddMenuItem("", "")
+	it.Disable()
+	it.Hide()
+	return it
+}
+
+// setInfo は動作情報行の文言をセットして表示する。
+func setInfo(item *systray.MenuItem, text string) {
+	if item == nil {
 		return
 	}
-	switch name {
-	case "":
-		mPin.Hide() // 固定モード off
-	case idlePinPlaceholder:
-		mPin.SetTitle("固定先: なし")
-		mPin.Show()
-	default:
-		mPin.SetTitle("固定先: " + name)
-		mPin.Show()
+	item.SetTitle(text)
+	item.Show()
+}
+
+// setupToggleMenus は keystroke 出力のとき、固定モード / 送信キーのトグルを表示して配線する。
+// slack 出力など keystroke 以外では意味がないので隠したままにする。serve から一度だけ呼ぶ。
+// ON/OFF は macOS 標準のチェックマーク(左のレ点)だけで示す — ラベルに ON/✅ を足すと冗長。
+func setupToggleMenus(cfg *config.Config) {
+	if cfg.Output != "keystroke" || mPinToggle == nil || mAutoEnter == nil {
+		return
+	}
+	syncCheck(mPinToggle, pinTargetOn.Load())
+	syncCheck(mAutoEnter, autoEnterOn.Load())
+	mPinToggle.Show()
+	mAutoEnter.Show()
+
+	go func() {
+		for range mPinToggle.ClickedCh {
+			on := !pinTargetOn.Load()
+			pinTargetOn.Store(on)
+			syncCheck(mPinToggle, on)
+			if on {
+				log.Println("📍 固定モードを ON にしました(次のリッスン開始時の最前面アプリに固定)。")
+			} else {
+				log.Println("📍 固定モードを OFF にしました(発話終了時の最前面アプリに貼り付け)。")
+			}
+			setPinLabel(idlePinLabel(cfg)) // 待機表示を新しい設定に合わせて更新
+		}
+	}()
+
+	go func() {
+		for range mAutoEnter.ClickedCh {
+			on := !autoEnterOn.Load()
+			autoEnterOn.Store(on)
+			syncCheck(mAutoEnter, on)
+			if on {
+				log.Println("↵ 送信キーを ON にしました(貼り付け後に送信キーを送る)。")
+			} else {
+				log.Println("↵ 送信キーを OFF にしました(貼り付けのみ・送信しない)。")
+			}
+		}
+	}()
+}
+
+// syncCheck はチェックボックス項目のレ点を on/off に合わせる。
+func syncCheck(item *systray.MenuItem, on bool) {
+	if on {
+		item.Check()
+	} else {
+		item.Uncheck()
 	}
 }
 
@@ -414,7 +502,8 @@ func applyIcon(state iconState) {
 	stopBlink()
 	switch state {
 	case iconListen:
-		systray.SetTemplateIcon(trayicon.Listen, trayicon.Listen)
+		// リッスン中は黄色(カラー=非テンプレート)で目立たせる。待機時は Idle の黒テンプレートに戻る。
+		systray.SetIcon(trayicon.ListenOn)
 	case iconTranscribe:
 		systray.SetTemplateIcon(trayicon.Transcribe, trayicon.Transcribe)
 	default: // iconIdle
@@ -543,6 +632,11 @@ func serve(dryRun bool) {
 		log.Fatalf("設定エラー: %v", err)
 	}
 
+	// 実行時スイッチを config の値で初期化し、keystroke 出力ならメニューのトグルを配線する。
+	pinTargetOn.Store(cfg.Keystroke.PinTarget)
+	autoEnterOn.Store(cfg.Keystroke.AutoEnter)
+	setupToggleMenus(cfg)
+
 	// 出力先(sink)を決める。dryRun は出力せず表示のみ(out.send == nil)。
 	out := buildOutput(cfg, dryRun)
 
@@ -616,17 +710,23 @@ func serve(dryRun bool) {
 	if dryRun {
 		dst = "ドライラン(出力しません)"
 	}
-	setPinLabel(idlePinLabel(cfg)) // 固定モードなら起動時から 🎯--- を出す(未 arm)
+	setPinLabel(idlePinLabel(cfg)) // 固定モードなら起動時から ⋯ を出す(未 arm)
+
+	// 状態の下に動作情報を常時表示(出力/方式/キー)。全角キーで幅を揃える。
+	setInfo(mInfoOutput, "出力 : "+dst)
+	setInfo(mInfoKey, "キー : "+cfg.Hotkey.String())
 
 	if cfg.ListenMode == "vad" {
-		log.Printf("ura-talk 起動 [%s / VAD]。[%s] でリッスン開始/停止。話すと無音で自動区切りして出力します。", dst, cfg.Hotkey)
-		tray.setBase(iconIdle, fmt.Sprintf("待機中 (%s/VAD) — %s でリッスン", dst, cfg.Hotkey))
+		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして出力します。", dst, cfg.Hotkey)
+		setInfo(mInfoMode, "方式 : VAD(自動区切り)")
+		tray.setBase(iconIdle, "待機中…")
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
 	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", dst, cfg.Hotkey)
-	tray.setBase(iconIdle, fmt.Sprintf("待機中 (%s/PTT) — %s で録音", dst, cfg.Hotkey))
+	setInfo(mInfoMode, "方式 : PTT(押している間だけ)")
+	tray.setBase(iconIdle, "待機中…")
 	pttLoop(rec, wh, out, cfg, down, up)
 }
 
@@ -769,7 +869,7 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		if active {
 			tray.setBase(iconRec, "● 音声検出中…")
 		} else {
-			tray.setBase(iconListen, "リッスン中(無音待ち)…")
+			tray.setBase(iconListen, "聞き取り中(無音待ち)…")
 		}
 	}
 
@@ -806,7 +906,7 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			capturePinTarget(cfg)                       // 固定先を記憶(タイトル/ドロップダウンにも反映)
 			watchStop = startFocusWatch(cfg, focusLost) // 固定モードなら前面監視を開始
 			log.Println("🎙 リッスン開始(話すと自動で区切って投稿。もう一度キーで停止)")
-			tray.setBase(iconListen, "リッスン中(無音待ち)…")
+			tray.setBase(iconListen, "聞き取り中(無音待ち)…")
 			playOn(cfg)
 			continue
 		}
@@ -824,7 +924,7 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 // startFocusWatch は固定モードのとき、最前面が固定先 PID から外れたら focusLost に通知する
 // 監視 goroutine を起動し、その停止チャネルを返す。固定モードでない/対象未取得なら nil。
 func startFocusWatch(cfg *config.Config, focusLost chan struct{}) chan struct{} {
-	if cfg.Output != "keystroke" || !cfg.Keystroke.PinTarget {
+	if cfg.Output != "keystroke" || !pinTargetOn.Load() {
 		return nil
 	}
 	target := pinnedSnapshot()
