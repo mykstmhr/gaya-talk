@@ -9,7 +9,9 @@
 // ウィンドウは sharingType=None にしてあり、画面共有・収録には映らない
 // (裏トークが会議の相手に見えてしまわないための安全弁)。
 //
-// モニターの抜き差しには追従しない(構成を変えたらアプリを再起動する)。
+// モニターの抜き差しには自動で追従する(増えたぶんは追加、減ったぶんは伏せる)。
+// 追従しないと、外したモニターのウィンドウを macOS が残りの画面へ移動させ、
+// 同じコメントが二重に流れてしまう。
 package overlay
 
 /*
@@ -36,37 +38,46 @@ static NSMutableArray<NSWindow *> *gWins = nil;
 static int gLanesN[OVERLAY_MAX_SCREENS];
 static CFTimeInterval gLaneFree[OVERLAY_MAX_SCREENS][OVERLAY_MAX_LANES];
 
-static void overlayStart(void) {
-	dispatch_async(dispatch_get_main_queue(), ^{
-		if (gWins) return;
-		// cgo は ARC なしでコンパイルされるため、autorelease される +[NSMutableArray array]
-		// を static に置いてはいけない(プール解放後にダングリングする)。alloc で所有する。
-		gWins = [[NSMutableArray alloc] init];
-		for (NSScreen *scr in [NSScreen screens]) {
-			NSUInteger i = gWins.count;
-			if (i >= OVERLAY_MAX_SCREENS) break;
-			NSRect f = scr.frame;
-			NSWindow *w = [[NSWindow alloc] initWithContentRect:f
-				styleMask:NSWindowStyleMaskBorderless
-				backing:NSBackingStoreBuffered defer:NO];
-			w.opaque = NO;
-			w.backgroundColor = [NSColor clearColor];
-			w.ignoresMouseEvents = YES;
-			w.hasShadow = NO;
-			w.level = NSScreenSaverWindowLevel;
-			// 全 Space + フルスクリーンアプリの上にも出す(会議アプリはフルスクリーンが多い)。
-			w.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
-				| NSWindowCollectionBehaviorFullScreenAuxiliary
-				| NSWindowCollectionBehaviorStationary;
-			// 画面共有・スクリーンショットに映さない(裏トークを会議相手に見せない)。
-			w.sharingType = NSWindowSharingNone;
-			w.releasedWhenClosed = NO;
-			NSView *v = [[NSView alloc] initWithFrame:f];
-			v.wantsLayer = YES;
-			w.contentView = v;
-			[w orderFrontRegardless];
-			[gWins addObject:w];
+// オーバーレイウィンドウを 1 枚作る(位置は overlaySync が合わせる)。
+static NSWindow* overlayBuildWindow(void) {
+	NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1, 1)
+		styleMask:NSWindowStyleMaskBorderless
+		backing:NSBackingStoreBuffered defer:NO];
+	w.opaque = NO;
+	w.backgroundColor = [NSColor clearColor];
+	w.ignoresMouseEvents = YES;
+	w.hasShadow = NO;
+	w.level = NSScreenSaverWindowLevel;
+	// 全 Space + フルスクリーンアプリの上にも出す(会議アプリはフルスクリーンが多い)。
+	w.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
+		| NSWindowCollectionBehaviorFullScreenAuxiliary
+		| NSWindowCollectionBehaviorStationary;
+	// 画面共有・スクリーンショットに映さない(裏トークを会議相手に見せない)。
+	w.sharingType = NSWindowSharingNone;
+	w.releasedWhenClosed = NO;
+	NSView *v = [[NSView alloc] initWithFrame:w.frame];
+	v.wantsLayer = YES;
+	w.contentView = v;
+	return w;
+}
 
+// 画面構成に合わせてウィンドウを並べ直す(voicebar と同じ使い回し方式)。
+// モニターが増えたぶんは追加し、減ったぶんは伏せる。追従しないと、外した
+// モニターのウィンドウを macOS が残りの画面へ移動させ、コメントが二重に流れる。
+static void overlaySync(void) {
+	NSArray<NSScreen *> *screens = [NSScreen screens];
+	while (gWins.count < screens.count && gWins.count < OVERLAY_MAX_SCREENS) {
+		[gWins addObject:overlayBuildWindow()];
+	}
+	for (NSUInteger i = 0; i < gWins.count; i++) {
+		NSWindow *w = gWins[i];
+		if (i >= screens.count) { // モニターが減ったぶんは伏せる
+			[w orderOut:nil];
+			continue;
+		}
+		NSRect f = screens[i].frame;
+		if (!NSEqualRects(w.frame, f)) {
+			[w setFrame:f display:NO];
 			CGFloat laneH = kFontSize * 1.5;
 			// 画面の上 8 割だけを使う(下端は字幕・Dock と被りやすいので空ける)。
 			int lanes = (int)((f.size.height * 0.8 - kTopMargin) / laneH);
@@ -75,6 +86,25 @@ static void overlayStart(void) {
 			gLanesN[i] = lanes;
 			for (int l = 0; l < OVERLAY_MAX_LANES; l++) gLaneFree[i][l] = 0;
 		}
+		[w orderFrontRegardless];
+	}
+}
+
+static void overlayStart(void) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		if (gWins) return;
+		// cgo は ARC なしでコンパイルされるため、autorelease される +[NSMutableArray array]
+		// を static に置いてはいけない(プール解放後にダングリングする)。alloc で所有する。
+		gWins = [[NSMutableArray alloc] init];
+		overlaySync();
+		// モニターの抜き差し・解像度変更に追従する。トークンは retain して持ち続ける
+		// (ARC なしなので、放置すると autorelease されて観測が止まりうる)。
+		static id gScreenObs = nil;
+		gScreenObs = [[[NSNotificationCenter defaultCenter]
+			addObserverForName:NSApplicationDidChangeScreenParametersNotification
+			object:nil queue:[NSOperationQueue mainQueue]
+			usingBlock:^(NSNotification *note) { overlaySync(); }] retain];
+		(void)gScreenObs;
 	});
 }
 
@@ -114,6 +144,7 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 
 		for (NSUInteger wi = 0; wi < gWins.count; wi++) {
 			NSWindow *win = gWins[wi];
+			if (!win.isVisible) continue; // 外したモニターのぶんは伏せてある
 			NSView *host = win.contentView;
 			CGFloat W = host.bounds.size.width;
 			CGFloat H = host.bounds.size.height;
@@ -175,7 +206,8 @@ import (
 	"unsafe"
 )
 
-// Start は透過オーバーレイウィンドウを接続中の全モニターに作る。二重呼び出しは無害。
+// Start は透過オーバーレイウィンドウを接続中の全モニターに作り、以後の
+// モニターの抜き差しにも追従する。二重呼び出しは無害。
 // AppKit のメインループ(systray.Run)が動いていることが前提。
 func Start() {
 	C.overlayStart()
