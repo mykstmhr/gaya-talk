@@ -46,18 +46,22 @@ var (
 )
 
 // addRoomMenuItems はメニュー項目を(隠したまま)作る。onReady から呼ぶ。
+// 上段=今のルームに対する操作、下段=別ルームへの入り口、で区切る。
 func addRoomMenuItems() {
 	mRoomState = systray.AddMenuItem("ルーム : 未参加", "現在のルーム接続状態")
 	mRoomState.Disable()
 	mRoomState.Hide()
-	mRoomCreate = systray.AddMenuItem("ルームを作成して URL をコピー", "中継サーバにルームを作り、共有 URL をクリップボードへ")
-	mRoomCreate.Hide()
-	mRoomJoin = systray.AddMenuItem("URL で参加…", "共有 URL を入力してルームに参加する(コピー済みなら自動で入る)")
-	mRoomJoin.Hide()
 	mRoomCopyURL = systray.AddMenuItem("このルームの URL をコピー", "今参加しているルームの共有 URL をクリップボードへ(後から来る人を招く)")
 	mRoomCopyURL.Hide()
 	mRoomLeave = systray.AddMenuItem("ルームから退出", "ルームとの接続を切る")
 	mRoomLeave.Hide()
+
+	systray.AddSeparator()
+
+	mRoomJoin = systray.AddMenuItem("ルームに URL で参加…", "共有 URL を入力してルームに参加する(コピー済みなら自動で入る)")
+	mRoomJoin.Hide()
+	mRoomCreate = systray.AddMenuItem("新規ルームを作成して URL をコピー", "中継サーバにルームを作り、共有 URL をクリップボードへ")
+	mRoomCreate.Hide()
 }
 
 // setupRoom は room 出力の初期化: オーバーレイ・入力バー・メニューの配線。serve から一度だけ呼ぶ。
