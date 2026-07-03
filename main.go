@@ -819,8 +819,16 @@ func buildTrigger(cfg *config.Config) (down, up <-chan struct{}, stop func(), er
 		}
 	}
 
-	if len(cfg.Hotkey.Mods) == 0 && modkey.Is(keyName) {
-		events, err := modkey.Watch(keyName)
+	// 単体修飾キー、または修飾キー 2 つのコード(例 mods:["rightshift"], key:"rightcmd")。
+	if modkey.Is(keyName) && (len(cfg.Hotkey.Mods) == 0 ||
+		(len(cfg.Hotkey.Mods) == 1 && modkey.Is(strings.ToLower(cfg.Hotkey.Mods[0])))) {
+		var events <-chan bool
+		var err error
+		if len(cfg.Hotkey.Mods) == 1 {
+			events, err = modkey.WatchChord(keyName, strings.ToLower(cfg.Hotkey.Mods[0]))
+		} else {
+			events, err = modkey.Watch(keyName)
+		}
 		if err != nil {
 			return nil, nil, nil, err
 		}
