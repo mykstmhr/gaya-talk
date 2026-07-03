@@ -71,6 +71,16 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 **ソロモード**: ルーム未参加(または `room.server` 未設定)でも、自分のコメントは自分の画面に流れる。
 
+### Slack に記録する(任意)
+
+ルームのコメントを Slack チャンネルに残したいときは、**参加者のうち 1 人(ミラー役、通常はホスト)** だけが Slack を設定すればよい(他のメンバーは何も要らない)。復号済みのコメントはミラー役のクライアントが持っているので、そこから転送する(中継サーバは本文を復号できない)。
+
+1. Slack アプリを作成 → **Bot Token Scopes** に `chat:write` → ワークスペースにインストールして **Bot Token(`xoxb-…`)** を取得 → 投稿先チャンネルに bot を招待
+2. config の `room.slack_bot_token`(または環境変数 `URATALK_SLACK_BOT_TOKEN`)と `room.slack_channel` を設定
+3. ルームに入るとメニューに **「Slack に記録」** が出る。オンにすると親メッセージが 1 本立ち、以降のコメントがそのスレッドに転送される(チャンネルを汚さない)。退出・切断で自動停止
+
+投稿は bot(アプリ)名義なので、匿名ルームなら Slack 上でも匿名のまま。記名ルームなら `[表示名]` 付きで転送される。ミラー役が複数いると二重投稿になるので、Slack 設定をするのは 1 人にすること。
+
 **匿名 / 記名**: 既定の匿名ルームではコメントに名前は付かない(起動ごとのランダムな色で同一人物を追える)。「記名」で作ったルームでは各コメントに `[表示名]` が付く。表示名は `room.display_name`、未設定なら**記名ルームの作成/参加時に入力を求められる**(入力した名前は内部ファイルに保存され次回以降は聞かれない)。あとから変えるにはメニューの「**表示名を変更…**」(現在の名前が併記される。`display_name` を config に設定している場合はそちらが優先で、この項目は無効)。匿名/記名はルーム作成者が決め、共有 URL に含まれるので参加者全員で揃う(URL の `&n=1` が記名)。
 
 ## 困ったとき
@@ -141,6 +151,8 @@ npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.
 | `room.server` | 中継サーバ URL(`server/` のデプロイ先)。空ならソロモード | `""` |
 | `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式。コードも可) | `rightcmd` |
 | `room.display_name` | 記名ルームで名乗る表示名。空なら作成/参加時に入力を促す(内部保存) | `""` |
+| `room.slack_bot_token` | Slack ミラーの bot token(`xoxb-…`)。env `URATALK_SLACK_BOT_TOKEN` でも可 | `""` |
+| `room.slack_channel` | Slack ミラーの投稿先チャンネル(ID 推奨) | `""` |
 | `voice_input` | 音声入力の可否。`auto`(出力がイヤホンならオン/スピーカーなら自動オフ) / `on` / `off`(文字のみ・マイク不要)。旧 `true`/`false` も可 | `auto` |
 | `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |
 | `hotkey` | 音声リッスンのホットキー(単体修飾キー / mods+key / コード) | `rightshift+rightcmd` |
@@ -193,7 +205,8 @@ internal/enhance/enhance.go      文字起こしをローカル LLM(Ollama)で�
 internal/room/                   ルーム: 共有 URL・E2E 暗号化(AES-GCM)・自動再接続つき WS クライアント
 internal/overlay/                ニコニコ風オーバーレイ(透過・クリック貫通・全モニター・画面共有に映らない)
 internal/inputbar/               Spotlight 風の文字入力バー(非アクティブ化パネル)
-internal/dialog/                 モーダル入力ダイアログ(URL 参加用)
+internal/dialog/                 モーダル入力ダイアログ(URL 参加・表示名入力用)
+internal/slack/slack.go          Slack ミラー(bot token で chat.postMessage・スレッド投稿)
 internal/audioout/                既定の音声出力(イヤホン/スピーカー)を判定・監視(voice_input:auto 用)
 internal/modkey/modkey_darwin.go 単体修飾キー・修飾キー2つのコードを CGEventTap で検出(複数キー監視可)
 internal/trayicon/trayicon.go    メニューバーのアイコン(待機/聞き取り=オレンジ/録音/文字起こし)
@@ -205,5 +218,5 @@ server/                          ルームの中継サーバ(Cloudflare Workers 
 設計と今後の予定は [docs/room-overlay-design.md](docs/room-overlay-design.md) を参照。
 
 - ~~**v1.1**: 記名モード(ルーム作成時に匿名/記名を選択)~~ ✅ 実装済み
-- **v1.2**: Slack ミラー(ルームのコメントを Slack チャンネルへ転送。入口はあくまでオーバーレイ)
+- ~~**v1.2**: Slack ミラー(ルームのコメントを Slack チャンネルへ転送)~~ ✅ 実装済み
 - 以降: コメント密度に応じた自動フォント縮小、モニター構成変更への自動追従、Windows クライアント(表示側のみ先行)など

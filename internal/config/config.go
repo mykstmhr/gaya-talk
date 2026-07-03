@@ -100,6 +100,12 @@ type RoomConfig struct {
 	InputHotkey Hotkey `json:"input_hotkey"`
 	// DisplayName は記名モードのルームで名乗る表示名(空なら記名ルームでも匿名)。
 	DisplayName string `json:"display_name"`
+	// SlackBotToken は Slack ミラー(コメントをチャンネルへ転送)に使う bot token(xoxb)。
+	// 設定した人だけがミラー役になれる。空ならミラー機能は出ない。
+	// 環境変数 URATALK_SLACK_BOT_TOKEN でも渡せる(config に平文で書きたくない場合)。
+	SlackBotToken string `json:"slack_bot_token"`
+	// SlackChannel は Slack ミラーの投稿先チャンネル(ID "C0123..." 推奨、"#general" も可)。
+	SlackChannel string `json:"slack_channel"`
 }
 
 // EnhanceConfig はローカル LLM(Ollama)による文字起こし整形の設定。
@@ -200,6 +206,9 @@ func Load() (*Config, error) {
 
 	if v := os.Getenv("URATALK_WHISPER_MODEL"); v != "" {
 		cfg.WhisperModel = v
+	}
+	if v := os.Getenv("URATALK_SLACK_BOT_TOKEN"); v != "" {
+		cfg.Room.SlackBotToken = v
 	}
 	cfg.WhisperModel = expandHome(cfg.WhisperModel)
 	return cfg, nil

@@ -19,6 +19,7 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/modkey"
 	"github.com/mykstmhr/ura-talk/internal/overlay"
 	"github.com/mykstmhr/ura-talk/internal/room"
+	"github.com/mykstmhr/ura-talk/internal/slack"
 
 	"fyne.io/systray"
 	"golang.design/x/hotkey"
@@ -46,6 +47,7 @@ var (
 	mRoomCopyURL     *systray.MenuItem
 	mRoomLeave       *systray.MenuItem
 	mRoomName        *systray.MenuItem
+	mSlackMirror     *systray.MenuItem
 )
 
 // addRoomMenuItems はメニュー項目を(隠したまま)作る。onReady から呼ぶ。
@@ -56,6 +58,8 @@ func addRoomMenuItems() {
 	mRoomState.Hide()
 	mRoomCopyURL = systray.AddMenuItem("このルームの URL をコピー", "今参加しているルームの共有 URL をクリップボードへ(後から来る人を招く)")
 	mRoomCopyURL.Hide()
+	mSlackMirror = systray.AddMenuItemCheckbox("Slack に記録", "このルームのコメントを Slack チャンネルにスレッドで転送する", false)
+	mSlackMirror.Hide()
 	mRoomLeave = systray.AddMenuItem("ルームから退出", "ルームとの接続を切る")
 	mRoomLeave.Hide()
 
@@ -138,6 +142,7 @@ func setupRoom(cfg *config.Config) {
 	}()
 	go func() {
 		for range mRoomLeave.ClickedCh {
+			stopMirror() // 退出したら記録も止める
 			roomClient.Leave()
 			log.Println("ルームから退出しました。")
 		}
@@ -150,6 +155,17 @@ func setupRoom(cfg *config.Config) {
 			changeDisplayName(cfg)
 		}
 	}()
+
+	// Slack ミラーは bot token とチャンネルが設定されている人にだけ出す(ミラー役)。
+	if strings.TrimSpace(cfg.Room.SlackBotToken) != "" && strings.TrimSpace(cfg.Room.SlackChannel) != "" {
+		mSlackMirror.Show()
+		mSlackMirror.Disable() // ルームに入るまで無効
+		go func() {
+			for range mSlackMirror.ClickedCh {
+				toggleSlackMirror(cfg)
+			}
+		}()
+	}
 }
 
 // changeDisplayName は表示名の変更ダイアログを出し、内部ファイルに保存する。
@@ -229,7 +245,7 @@ var (
 	seenIDs = map[string]time.Time{}
 )
 
-// displayComment は重複を除いてコメントをオーバーレイに流す。
+// displayComment は重複を除いてコメントをオーバーレイに流す(ミラー有効なら Slack へも)。
 func displayComment(p room.Payload) {
 	if p.ID != "" {
 		seenMu.Lock()
@@ -254,6 +270,83 @@ func displayComment(p room.Payload) {
 		text = "[" + p.Name + "] " + text
 	}
 	overlay.Show(text, p.Color)
+	mirrorToSlack(text)
+}
+
+// mirror は Slack ミラーの状態。ミラー役 1 人のクライアントで、受信した全コメント
+// (重複排除済み)を親メッセージのスレッドへ転送する。
+var (
+	mirrorMu      sync.Mutex
+	mirroring     bool
+	mirrorClient  *slack.Client
+	mirrorChannel string
+	mirrorThread  string // 親メッセージの ts。以降のコメントはここへぶら下げる
+)
+
+// toggleSlackMirror は Slack 記録の開始/停止を切り替える。開始時に親メッセージを 1 本立てる。
+func toggleSlackMirror(cfg *config.Config) {
+	mirrorMu.Lock()
+	on := mirroring
+	mirrorMu.Unlock()
+	if on {
+		stopMirror()
+		return
+	}
+	r := roomClient.Room()
+	if r == nil {
+		log.Println("⚠️ ルームに参加していません。")
+		return
+	}
+	cl := slack.New(cfg.Room.SlackBotToken)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ts, err := cl.PostMessage(ctx, cfg.Room.SlackChannel,
+		"📝 ura-talk のコメントをこのスレッドに記録します(room "+truncRunes(r.Token, 8)+")", "")
+	cancel()
+	if err != nil {
+		log.Printf("⚠️ Slack 記録を開始できませんでした: %v", err)
+		return
+	}
+	mirrorMu.Lock()
+	mirroring = true
+	mirrorClient = cl
+	mirrorChannel = cfg.Room.SlackChannel
+	mirrorThread = ts
+	mirrorMu.Unlock()
+	mSlackMirror.Check()
+	log.Println("✅ Slack 記録を開始しました(以降のコメントをスレッドに転送します)。")
+}
+
+// stopMirror は Slack 記録を止める(退出時にも呼ぶ)。
+func stopMirror() {
+	mirrorMu.Lock()
+	was := mirroring
+	mirroring = false
+	mirrorClient = nil
+	mirrorThread = ""
+	mirrorMu.Unlock()
+	if was {
+		if mSlackMirror != nil {
+			mSlackMirror.Uncheck()
+		}
+		log.Println("■ Slack 記録を停止しました。")
+	}
+}
+
+// mirrorToSlack はミラー有効時、コメントをスレッドへ転送する(失敗しても表示は止めない)。
+func mirrorToSlack(text string) {
+	mirrorMu.Lock()
+	on, cl, ch, th := mirroring, mirrorClient, mirrorChannel, mirrorThread
+	mirrorMu.Unlock()
+	if !on || cl == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := cl.PostMessage(ctx, ch, text, th); err != nil {
+			log.Printf("Slack 転送失敗: %v", err)
+		}
+	}()
 }
 
 // createAndJoinRoom はルームを作成して共有 URL をコピーし、自分も参加する。
@@ -417,9 +510,13 @@ func setRoomState(s room.State) {
 		}
 		id = " (" + truncRunes(r.Token, 8) + " / " + tag + ")"
 	}
-	// URL コピーは接続中でなくても、ルームに属している間(接続試行中含む)は使える。
+	// URL コピー・Slack 記録は、ルームに属している間(接続試行中含む)は使える。
 	joined := roomClient.Room() != nil
 	toggle(mRoomCopyURL, joined)
+	toggle(mSlackMirror, joined)
+	if !joined {
+		stopMirror() // 切断されたら記録も止める
+	}
 	switch s {
 	case room.StateConnected:
 		mRoomState.SetTitle("ルーム : 参加中" + id)
