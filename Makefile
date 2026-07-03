@@ -91,6 +91,23 @@ dist: app ## 配布用に .app を zip 化(dist/ura-talk.app.zip)
 	@echo "配布先での初回起動: アプリを右クリック→「開く」(またはターミナルで xattr -dr com.apple.quarantine /path/to/ura-talk.app)"
 	@echo "起動後にアクセシビリティ権限を許可。音声も使うなら別途 whisper-cpp とモデルが必要。"
 
+# GitHub Release を作る。タグを push すると CI(.github/workflows/release.yml)が
+# テスト → make dist → zip を Release に添付する。ローカルではビルドしない。
+release: ## GitHub Release を作る(make release VERSION=v1.2.3)
+	@if [ -z "$(VERSION)" ]; then \
+	  echo "使い方: make release VERSION=v1.2.3"; \
+	  last=$$(git describe --tags --abbrev=0 2>/dev/null); \
+	  [ -n "$$last" ] && echo "直近のタグ: $$last" || echo "タグはまだありません(v0.1.0 から始めるのがおすすめ)"; \
+	  exit 1; \
+	fi
+	@case "$(VERSION)" in v[0-9]*) ;; *) echo "⚠️ VERSION は v から始めてください(例 v1.2.3)"; exit 1 ;; esac
+	@[ -z "$$(git status --porcelain)" ] || { echo "⚠️ 未コミットの変更があります。コミットしてから release してください。"; exit 1; }
+	@go test ./internal/... > /dev/null || { echo "⚠️ テストが失敗しました。"; exit 1; }
+	@git tag -a "$(VERSION)" -m "$(VERSION)"
+	@git push origin main "$(VERSION)"
+	@echo "✅ タグ $(VERSION) を push しました。CI がテスト → zip ビルド → Release 添付まで行います。"
+	@echo "   進捗: https://github.com/mykstmhr/ura-talk/actions"
+
 # 起動中の ura-talk を停止して開き直す(config 変更の反映など)。
 # -x はプロセス名で完全一致するので、pkill 自身のシェル行を誤爆しない。
 restart: ## 起動中の .app を停止して開き直す(config 変更の反映。再ビルドはしない)

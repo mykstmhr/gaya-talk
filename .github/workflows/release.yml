@@ -1,0 +1,38 @@
+# v* タグを push すると .app を zip 化して GitHub Release に添付する。
+# CI には署名証明書が無いためアドホック署名になる(Makefile が自動フォールバック)。
+# 受け取った人は初回のみ右クリック→「開く」で Gatekeeper を通す(README 参照)。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  dist:
+    runs-on: macos-latest # Apple Silicon(このアプリの動作要件と同じ)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: サーバのテスト
+        run: cd server && npm install && npm test
+      - name: クライアントのテスト
+        run: go test ./internal/...
+      - name: 配布用 zip を作成
+        run: make dist
+      - name: Release を作成して zip を添付
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/ura-talk.app.zip
+          generate_release_notes: true
+          body: |
+            `ura-talk.app.zip` を解凍して起動してください(macOS / Apple Silicon)。
+
+            - 初回のみ Gatekeeper のため **右クリック →「開く」**(または `xattr -dr com.apple.quarantine ura-talk.app`)
+            - 起動したら**アクセシビリティ権限**を許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る
+            - 設定ファイルは初回起動時に `~/.config/ura-talk/config.json` に自動生成されます(メニューの「設定ファイルを開く…」から編集できます)
+            - 声も使う場合は別途 `brew install whisper-cpp` とモデルが必要です(リポジトリの README 参照)
