@@ -38,10 +38,11 @@ var commentPalette = []string{
 
 // room 用メニュー項目(onReady で作成し、room 出力のときだけ表示)。
 var (
-	mRoomState  *systray.MenuItem
-	mRoomCreate *systray.MenuItem
-	mRoomJoin   *systray.MenuItem
-	mRoomLeave  *systray.MenuItem
+	mRoomState   *systray.MenuItem
+	mRoomCreate  *systray.MenuItem
+	mRoomJoin    *systray.MenuItem
+	mRoomCopyURL *systray.MenuItem
+	mRoomLeave   *systray.MenuItem
 )
 
 // addRoomMenuItems はメニュー項目を(隠したまま)作る。onReady から呼ぶ。
@@ -53,6 +54,8 @@ func addRoomMenuItems() {
 	mRoomCreate.Hide()
 	mRoomJoin = systray.AddMenuItem("URL で参加…", "共有 URL を入力してルームに参加する(コピー済みなら自動で入る)")
 	mRoomJoin.Hide()
+	mRoomCopyURL = systray.AddMenuItem("このルームの URL をコピー", "今参加しているルームの共有 URL をクリップボードへ(後から来る人を招く)")
+	mRoomCopyURL.Hide()
 	mRoomLeave = systray.AddMenuItem("ルームから退出", "ルームとの接続を切る")
 	mRoomLeave.Hide()
 }
@@ -86,6 +89,8 @@ func setupRoom(cfg *config.Config) {
 	mRoomState.Show()
 	mRoomCreate.Show()
 	mRoomJoin.Show()
+	mRoomCopyURL.Show()
+	mRoomCopyURL.Disable()
 	mRoomLeave.Show()
 	mRoomLeave.Disable()
 
@@ -100,11 +105,30 @@ func setupRoom(cfg *config.Config) {
 		}
 	}()
 	go func() {
+		for range mRoomCopyURL.ClickedCh {
+			copyCurrentRoomURL()
+		}
+	}()
+	go func() {
 		for range mRoomLeave.ClickedCh {
 			roomClient.Leave()
 			log.Println("ルームから退出しました。")
 		}
 	}()
+}
+
+// copyCurrentRoomURL は参加中ルームの共有 URL をクリップボードへコピーする。
+func copyCurrentRoomURL() {
+	r := roomClient.Room()
+	if r == nil {
+		log.Println("⚠️ ルームに参加していません。")
+		return
+	}
+	if err := pbcopy(r.URL()); err != nil {
+		log.Printf("⚠️ クリップボードへコピーできませんでした。URL: %s", r.URL())
+		return
+	}
+	log.Println("✅ このルームの URL をクリップボードへコピーしました。")
 }
 
 // sendRoomComment はコメントをルームへ流す。表示は全員分をサーバのエコーで
@@ -212,6 +236,9 @@ func setRoomState(s room.State) {
 	if r := roomClient.Room(); r != nil {
 		id = " (" + truncRunes(r.Token, 8) + ")"
 	}
+	// URL コピーは接続中でなくても、ルームに属している間(接続試行中含む)は使える。
+	joined := roomClient.Room() != nil
+	toggle(mRoomCopyURL, joined)
 	switch s {
 	case room.StateConnected:
 		mRoomState.SetTitle("ルーム : 参加中" + id)
@@ -222,6 +249,18 @@ func setRoomState(s room.State) {
 	default:
 		mRoomState.SetTitle("ルーム : 未参加(ソロモード)")
 		mRoomLeave.Disable()
+	}
+}
+
+// toggle はメニュー項目の有効/無効を切り替える。
+func toggle(item *systray.MenuItem, on bool) {
+	if item == nil {
+		return
+	}
+	if on {
+		item.Enable()
+	} else {
+		item.Disable()
 	}
 }
 
