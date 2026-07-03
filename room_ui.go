@@ -117,13 +117,17 @@ func setupRoom(cfg *config.Config) {
 	}
 
 	mRoomState.Show()
-	mRoomCreateAnon.Show()
-	mRoomCreateNamed.Show()
 	mRoomJoin.Show()
 	mRoomCopyURL.Show()
 	mRoomCopyURL.Disable()
 	mRoomLeave.Show()
 	mRoomLeave.Disable()
+
+	// ルーム作成は中継サーバが要る。room.server 未設定(=参加専用)なら作成メニューは出さない。
+	if strings.TrimSpace(cfg.Room.Server) != "" {
+		mRoomCreateAnon.Show()
+		mRoomCreateNamed.Show()
+	}
 
 	go func() {
 		for range mRoomCreateAnon.ClickedCh {
