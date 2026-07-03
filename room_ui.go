@@ -8,7 +8,6 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +15,8 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/config"
 	"github.com/mykstmhr/ura-talk/internal/dialog"
 	"github.com/mykstmhr/ura-talk/internal/inputbar"
+	"github.com/mykstmhr/ura-talk/internal/mirror"
+	"github.com/mykstmhr/ura-talk/internal/namestore"
 	"github.com/mykstmhr/ura-talk/internal/overlay"
 	"github.com/mykstmhr/ura-talk/internal/room"
 	"github.com/mykstmhr/ura-talk/internal/slack"
@@ -79,6 +80,12 @@ func addRoomMenuItems() {
 // setupRoom は room 出力の初期化: オーバーレイ・入力バー・メニューの配線。serve から一度だけ呼ぶ。
 func setupRoom(cfg *config.Config) {
 	myColor = commentPalette[rand.IntN(len(commentPalette))]
+	// 表示名の永続化ストアを用意する(ディレクトリ取得失敗時は空ストア=保存しないだけ)。
+	if dir, err := namestore.DefaultDir(); err == nil {
+		names = namestore.New(dir)
+	} else {
+		names = namestore.New("")
+	}
 	// 表示名を初期化する。config が優先、無ければ前回入力を保存した内部ファイルから。
 	// どちらも空なら記名ルームの作成/参加時に入力を促す(macOS ユーザー名は使わない)。
 	if n := strings.TrimSpace(cfg.Room.DisplayName); n != "" {
@@ -184,7 +191,9 @@ func changeDisplayName(cfg *config.Config) {
 		return // 空は変更なし扱い(誤って消さないため)
 	}
 	setDisplayName(n)
-	saveStoredName(n)
+	if err := names.Save(n); err != nil {
+		log.Printf("表示名の保存に失敗: %v", err)
+	}
 	updateNameMenu(cfg)
 	log.Printf("✅ 表示名を「%s」に変更しました。", n)
 }
@@ -271,22 +280,13 @@ func displayComment(p room.Payload) {
 	mirrorToSlack(text)
 }
 
-// mirror は Slack ミラーの状態。ミラー役 1 人のクライアントで、受信した全コメント
+// slackMirror は Slack 記録の状態(ミラー役 1 人のクライアント)。受信した全コメント
 // (重複排除済み)を親メッセージのスレッドへ転送する。
-var (
-	mirrorMu      sync.Mutex
-	mirroring     bool
-	mirrorClient  *slack.Client
-	mirrorChannel string
-	mirrorThread  string // 親メッセージの ts。以降のコメントはここへぶら下げる
-)
+var slackMirror mirror.Mirror
 
 // toggleSlackMirror は Slack 記録の開始/停止を切り替える。
 func toggleSlackMirror(cfg *config.Config) {
-	mirrorMu.Lock()
-	on := mirroring
-	mirrorMu.Unlock()
-	if on {
+	if slackMirror.Active() {
 		stopMirror()
 		return
 	}
@@ -304,21 +304,14 @@ func startMirror(cfg *config.Config, r *room.Room) {
 		log.Println("⚠️ Slack bot token が未設定のため記録できません。")
 		return
 	}
-	cl := slack.New(cfg.Room.SlackBotToken)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	ts, err := cl.PostMessage(ctx, r.SlackChannel,
-		"📝 ura-talk のコメントをこのスレッドに記録します(room "+truncRunes(r.Token, 8)+")", "")
-	cancel()
+	defer cancel()
+	err := slackMirror.Start(ctx, slack.New(cfg.Room.SlackBotToken), r.SlackChannel,
+		"📝 ura-talk のコメントをこのスレッドに記録します(room "+truncRunes(r.Token, 8)+")")
 	if err != nil {
 		log.Printf("⚠️ Slack 記録を開始できませんでした: %v", err)
 		return
 	}
-	mirrorMu.Lock()
-	mirroring = true
-	mirrorClient = cl
-	mirrorChannel = r.SlackChannel
-	mirrorThread = ts
-	mirrorMu.Unlock()
 	if mSlackMirror != nil {
 		mSlackMirror.Check()
 	}
@@ -327,13 +320,7 @@ func startMirror(cfg *config.Config, r *room.Room) {
 
 // stopMirror は Slack 記録を止める(退出時にも呼ぶ)。
 func stopMirror() {
-	mirrorMu.Lock()
-	was := mirroring
-	mirroring = false
-	mirrorClient = nil
-	mirrorThread = ""
-	mirrorMu.Unlock()
-	if was {
+	if slackMirror.Stop() {
 		if mSlackMirror != nil {
 			mSlackMirror.Uncheck()
 		}
@@ -343,16 +330,13 @@ func stopMirror() {
 
 // mirrorToSlack はミラー有効時、コメントをスレッドへ転送する(失敗しても表示は止めない)。
 func mirrorToSlack(text string) {
-	mirrorMu.Lock()
-	on, cl, ch, th := mirroring, mirrorClient, mirrorChannel, mirrorThread
-	mirrorMu.Unlock()
-	if !on || cl == nil {
+	if !slackMirror.Active() {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if _, err := cl.PostMessage(ctx, ch, text, th); err != nil {
+		if err := slackMirror.Post(ctx, text); err != nil {
 			log.Printf("Slack 転送失敗: %v", err)
 		}
 	}()
@@ -385,12 +369,11 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	r, err := room.Create(ctx, cfg.Room.Server, named)
+	r, err := room.Create(ctx, cfg.Room.Server, named, channel)
 	if err != nil {
 		log.Printf("⚠️ %v", err)
 		return
 	}
-	r.SlackChannel = channel
 	kind := "匿名"
 	if named {
 		kind = "記名(表示名: " + currentDisplayName() + ")"
@@ -453,45 +436,18 @@ func ensureDisplayName(cfg *config.Config) (string, bool) {
 		return "", false
 	}
 	setDisplayName(n)
-	saveStoredName(n) // 次回以降は聞かない(config とは別の内部ファイル)
+	if err := names.Save(n); err != nil { // 次回以降は聞かない(config とは別の内部ファイル)
+		log.Printf("表示名の保存に失敗: %v", err)
+	}
 	updateNameMenu(cfg)
 	return n, true
 }
 
-// stateDir は表示名などの内部状態を置くディレクトリ(多重起動ロックと同じ場所)。
-func stateDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	d := filepath.Join(home, "Library", "Application Support", "ura-talk")
-	if err := os.MkdirAll(d, 0o755); err != nil {
-		return "", err
-	}
-	return d, nil
-}
+// names は表示名の永続化ストア。setupRoom で初期化する。
+var names *namestore.Store
 
 // loadStoredName は前回入力した表示名を読む(無ければ空)。
-func loadStoredName() string {
-	d, err := stateDir()
-	if err != nil {
-		return ""
-	}
-	b, err := os.ReadFile(filepath.Join(d, "display_name"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-// saveStoredName は表示名を内部ファイルに保存する(config には書かない)。
-func saveStoredName(name string) {
-	d, err := stateDir()
-	if err != nil {
-		return
-	}
-	_ = os.WriteFile(filepath.Join(d, "display_name"), []byte(name), 0o600)
-}
+func loadStoredName() string { return names.Load() }
 
 // joinRoomWithDialog は共有 URL の入力ダイアログを出して参加する。
 // クリップボードに有効な共有 URL があればプリフィルするので、コピー済みなら

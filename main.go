@@ -25,7 +25,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -38,6 +37,7 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/transcribe"
 	"github.com/mykstmhr/ura-talk/internal/trayicon"
 	"github.com/mykstmhr/ura-talk/internal/vad"
+	"github.com/mykstmhr/ura-talk/internal/voicegate"
 
 	"fyne.io/systray"
 	"golang.design/x/hotkey"
@@ -447,10 +447,10 @@ func serve(dryRun bool) {
 	// "auto" は出力デバイスで音声入力の可否を決める(スピーカー出力中は相手の声を
 	// 拾わないよう自動オフ)。"on" は常に許可。出力の抜き差しに追従する。
 	if cfg.VoiceInput == config.VoiceAuto {
-		voiceAllowed.Store(audioout.Private())
+		voice = voicegate.New(audioout.Private())
 		audioout.Watch(func() { applyVoiceAuto(cfg) })
 	} else {
-		voiceAllowed.Store(true)
+		voice = voicegate.NewAlwaysOn()
 	}
 
 	// 送り先(sink)を決める。dryRun は送らず表示のみ(out.send == nil)。
@@ -527,7 +527,7 @@ func serve(dryRun bool) {
 	setInfo(mInfoKey, "キー : "+cfg.Hotkey.String())
 	updateModeInfo(cfg)
 	if cfg.VoiceInput == config.VoiceAuto {
-		if voiceAllowed.Load() {
+		if voice.Allowed() {
 			log.Println("🎧 イヤホン出力を検出 → 音声入力は有効です(スピーカーに切り替えると自動オフ)。")
 		} else {
 			log.Println("🔈 スピーカー出力を検出 → 音声入力は自動オフ中です(イヤホンにすると自動オン)。")
@@ -546,35 +546,27 @@ func serve(dryRun bool) {
 	pttLoop(rec, wh, out, cfg, down, up)
 }
 
-// voiceAllowed は音声入力を今受け付けてよいか(auto では出力デバイスに追従)。
-// voiceRevoke は「リッスン中に出力がスピーカーへ変わった」ことを VAD ループへ伝える。
-var (
-	voiceAllowed atomic.Bool
-	voiceRevoke  = make(chan struct{}, 1)
-)
+// voice は音声入力を今受け付けてよいかの状態(auto では出力デバイスに追従)。serve で構築。
+var voice *voicegate.Gate
 
 // applyVoiceAuto は出力構成の変化に応じて音声入力の可否を切り替える(auto 時のみ)。
 // audioout の監視コールバックから呼ばれる。
 func applyVoiceAuto(cfg *config.Config) {
 	priv := audioout.Private()
-	if priv == voiceAllowed.Swap(priv) {
+	if !voice.Set(priv) {
 		return // 変化なし
 	}
 	if priv {
 		log.Println("🎧 イヤホン出力を検出 → 音声入力を有効化しました。")
 	} else {
 		log.Println("🔈 スピーカー出力を検出 → 音声入力を無効化しました(相手の声をオーバーレイに拾わないため)。")
-		select {
-		case voiceRevoke <- struct{}{}: // リッスン中なら停止させる
-		default:
-		}
 	}
 	updateModeInfo(cfg)
 }
 
 // updateModeInfo は動作情報行(方式)を現在の状態に合わせて更新する。
 func updateModeInfo(cfg *config.Config) {
-	if cfg.VoiceInput == config.VoiceAuto && !voiceAllowed.Load() {
+	if cfg.VoiceInput == config.VoiceAuto && !voice.Allowed() {
 		setInfo(mInfoMode, "方式 : 音声オフ(スピーカー出力中)")
 		return
 	}
@@ -682,7 +674,7 @@ func playSound(name string) {
 func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down, up <-chan struct{}) {
 	for {
 		<-down
-		if !voiceAllowed.Load() {
+		if !voice.Allowed() {
 			log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
 			continue
 		}
@@ -749,12 +741,9 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	}
 	for {
 		if !listening {
-			select { // リッスンしていない間に来た revoke は捨てる
-			case <-voiceRevoke:
-			default:
-			}
+			voice.DrainRevoked() // リッスンしていない間に来た revoke は捨てる
 			<-down
-			if !voiceAllowed.Load() {
+			if !voice.Allowed() {
 				log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
 				continue
 			}
@@ -772,7 +761,7 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		case <-down: // 手動でトグル停止
 			log.Println("■ リッスン停止")
 			stop()
-		case <-voiceRevoke: // リッスン中に出力がスピーカーへ変わった → 自動停止
+		case <-voice.Revoked(): // リッスン中に出力がスピーカーへ変わった → 自動停止
 			log.Println("🔈 出力がスピーカーに変わったため音声入力を停止しました。")
 			stop()
 		}

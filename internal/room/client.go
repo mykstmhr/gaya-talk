@@ -15,7 +15,8 @@ import (
 
 // Create は中継サーバにルームを作成し、鍵をローカルで生成して Room を返す。
 // 鍵はサーバに送らない(URL フラグメント経由でメンバーにだけ渡る)。
-func Create(ctx context.Context, server string, named bool) (*Room, error) {
+// slackChannel は Slack 記録対象チャンネル(空なら記録対象でない)。
+func Create(ctx context.Context, server string, named bool, slackChannel string) (*Room, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		fmt.Sprintf("%s/rooms", trimSlash(server)), nil)
 	if err != nil {
@@ -42,7 +43,13 @@ func Create(ctx context.Context, server string, named bool) (*Room, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Room{Server: trimSlash(server), Token: out.Token, Key: key, Named: named}, nil
+	return &Room{
+		Server:       trimSlash(server),
+		Token:        out.Token,
+		Key:          key,
+		Named:        named,
+		SlackChannel: slackChannel,
+	}, nil
 }
 
 func trimSlash(s string) string {
