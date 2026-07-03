@@ -28,7 +28,7 @@
 
 ```sh
 brew install go            # ビルドに必要(未導入なら)
-make setup-lite            # config を配置し voice_input を off に(モデルは取得しない)
+make setup                 # config を配置し voice_input を off に(モデルは取得しない)
 make app-open              # .app をビルドして起動
 ```
 
@@ -46,7 +46,7 @@ make app-open              # .app をビルドして起動
 
 ```sh
 brew install whisper-cpp   # 文字起こしエンジン
-make setup                 # config 配置 + whisper モデルを番号で選んで取得
+make setup-voice           # config 配置 + whisper モデルを番号で選んで取得
 make app-open
 ```
 

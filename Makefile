@@ -1,4 +1,4 @@
-.PHONY: help build clean setup setup-lite app app-open dist model whisper-model enhance-model restart logs
+.PHONY: help build clean setup setup-voice app app-open dist model whisper-model enhance-model restart logs
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -27,20 +27,10 @@ CONFIG := $(HOME)/.config/ura-talk/config.json
 # 証明書がキーチェーンに無ければ自動でアドホック(-)にフォールバックする。
 SIGN_IDENTITY ?= ura-talk-dev
 
-# 初回セットアップ: config を配置し、whisper モデルを選んで取得する(make app の前に一度だけ)。
-setup: ## 初回セットアップ(config 配置 + whisper モデルを選んで取得)
-	@mkdir -p $(dir $(CONFIG))
-	@if [ -f "$(CONFIG)" ]; then \
-	  echo "既にあります(上書きしません): $(CONFIG)"; \
-	else \
-	  cp config.example.json "$(CONFIG)"; \
-	  echo "配置しました: $(CONFIG)(必要に応じ編集)"; \
-	fi
-	@$(MAKE) whisper-model
-
-# 文字だけで参加する人向け: config を配置し voice_input を off にする。
-# whisper モデルは取得しない(マイク・whisper・Ollama すべて不要)。
-setup-lite: ## 軽量セットアップ(文字だけで参加。config 配置・voice_input off・モデル不要)
+# 既定のセットアップ = 文字だけで参加する人向け(参加者が最も多いため)。
+# config を配置し voice_input を off にする。whisper モデルは取得しない
+# (マイク・whisper・Ollama すべて不要)。声も使うなら setup-voice。
+setup: ## 初回セットアップ(文字だけで参加。config 配置・voice_input off・モデル不要)
 	@mkdir -p $(dir $(CONFIG))
 	@if [ -f "$(CONFIG)" ]; then \
 	  echo "既にあります(上書きしません): $(CONFIG)"; \
@@ -51,6 +41,17 @@ setup-lite: ## 軽量セットアップ(文字だけで参加。config 配置・
 	  echo "配置しました(voice_input=off): $(CONFIG)"; \
 	fi
 	@echo "次: make app-open → アクセシビリティを許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る"
+
+# 音声入力も使う人向け: config を配置し、whisper モデルを選んで取得する。
+setup-voice: ## 音声も使うセットアップ(config 配置 + whisper モデルを選んで取得)
+	@mkdir -p $(dir $(CONFIG))
+	@if [ -f "$(CONFIG)" ]; then \
+	  echo "既にあります(上書きしません): $(CONFIG)"; \
+	else \
+	  cp config.example.json "$(CONFIG)"; \
+	  echo "配置しました: $(CONFIG)(必要に応じ編集)"; \
+	fi
+	@$(MAKE) whisper-model
 
 build: ## バイナリをビルド(bin/ura-talk)
 	go build $(LDFLAGS) -o bin/ura-talk .
@@ -111,7 +112,7 @@ model: ## whisper モデルを直接指定して取得(make model MODEL=<file>)
 	  echo "保存: $(MODEL_DIR)/$(MODEL)"; \
 	fi
 
-# whisper モデルを候補から選んで取得し、config の whisper_model に反映する(setup から呼ばれる)。
+# whisper モデルを候補から選んで取得し、config の whisper_model に反映する(setup-voice から呼ばれる)。
 whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	@mkdir -p $(MODEL_DIR)
 	@echo "whisper モデルを選んでください(数字を入力):"; \

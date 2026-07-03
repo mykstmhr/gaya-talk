@@ -84,7 +84,7 @@
     //===================================================================
     // whisper-cli の場所(brew install whisper-cpp)
     "whisper_bin": "/opt/homebrew/bin/whisper-cli",
-    // ggml モデルのパス(make setup / make model で取得・設定できる)
+    // ggml モデルのパス(make setup-voice / make model で取得・設定できる。voice_input:off なら不要)
     "whisper_model": "~/.config/ura-talk/models/ggml-large-v3-turbo.bin",
     // 文字起こし言語("ja" / 自動判定なら "auto" など)
     "language": "ja",
