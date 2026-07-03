@@ -161,3 +161,15 @@ func TestExampleConfig(t *testing.T) {
 	}
 }
 
+// 環境変数 URATALK_ROOM_SERVER が config の room.server を上書きする。
+func TestEnvRoomServer(t *testing.T) {
+	t.Setenv("URATALK_CONFIG", "../../config.example.json")
+	t.Setenv("URATALK_ROOM_SERVER", "https://env.example.workers.dev")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Room.Server != "https://env.example.workers.dev" {
+		t.Errorf("room.server = %q(環境変数が優先のはず)", cfg.Room.Server)
+	}
+}

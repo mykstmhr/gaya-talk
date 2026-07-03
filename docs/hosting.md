@@ -11,7 +11,7 @@
 make deploy                         # テスト実行 → デプロイ。出力される https://ura-talk-room.<account>.workers.dev を控える
 ```
 
-デプロイした URL を config の **`room.server`** に設定する(ルーム作成に使う。参加するだけの人には不要)。詳細は [server/README.md](../server/README.md)、設計は [room-overlay-design.md](room-overlay-design.md)。
+デプロイした URL を config の **`room.server`** に設定する(ルーム作成に使う。参加するだけの人には不要)。環境変数 **`URATALK_ROOM_SERVER`** でも渡せる(config より優先。ただし Finder から起動する `.app` はシェルの環境変数を引き継がないので、端末から `open` するか `launchctl setenv` を使う)。詳細は [server/README.md](../server/README.md)、設計は [room-overlay-design.md](room-overlay-design.md)。
 
 **費用**: テキストだけ・超低帯域なので、社内チームの会議で使う限り **Cloudflare 無料枠で収まります**。理由と目安は[アーキテクチャと無料枠のコスト](development.md#アーキテクチャと無料枠のコスト)を参照。
 

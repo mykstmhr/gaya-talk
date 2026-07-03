@@ -109,7 +109,7 @@ server/                          ルームの中継サーバ(Cloudflare Workers 
 - **コメントを書ける**(JSONC)。`//` 行コメント・`/* */` ブロックコメント・末尾カンマを許可する
 - トップレベルは主従を反映したブロック構成: `room`(オーバーレイ共有)+ `input_hotkey`(文字入力バー)が主、`voice`(音声入力)と `whisper`(文字起こし)がサブ。ほかに `sound`(効果音)・`enhance`(Ollama 整形)・`emoji`
 - 旧スキーマ(`voice_input` / `whisper_model` などトップレベルのフラットなキー、`room.input_hotkey`)の config もそのまま読める(新キーが優先)
-- 環境変数 `URATALK_WHISPER_MODEL` / `URATALK_SLACK_BOT_TOKEN` / `URATALK_CONFIG` で上書き可能
+- 環境変数 `URATALK_ROOM_SERVER` / `URATALK_WHISPER_MODEL` / `URATALK_SLACK_BOT_TOKEN` / `URATALK_CONFIG` で上書き可能
 
 ## ロードマップ
 

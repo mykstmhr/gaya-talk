@@ -234,6 +234,9 @@ func Load() (*Config, error) {
 		}
 	}
 
+	if v := os.Getenv("URATALK_ROOM_SERVER"); v != "" {
+		cfg.Room.Server = v
+	}
 	if v := os.Getenv("URATALK_WHISPER_MODEL"); v != "" {
 		cfg.Whisper.Model = v
 	}
