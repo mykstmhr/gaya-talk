@@ -8,7 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
-	"os/user"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +71,13 @@ func addRoomMenuItems() {
 // setupRoom は room 出力の初期化: オーバーレイ・入力バー・メニューの配線。serve から一度だけ呼ぶ。
 func setupRoom(cfg *config.Config) {
 	myColor = commentPalette[rand.IntN(len(commentPalette))]
+	// 表示名を初期化する。config が優先、無ければ前回入力を保存した内部ファイルから。
+	// どちらも空なら記名ルームの作成/参加時に入力を促す(macOS ユーザー名は使わない)。
+	if n := strings.TrimSpace(cfg.Room.DisplayName); n != "" {
+		setDisplayName(n)
+	} else {
+		setDisplayName(loadStoredName())
+	}
 	overlay.Start()
 
 	roomClient.OnMessage = displayComment
@@ -150,7 +157,7 @@ func copyCurrentRoomURL() {
 func sendRoomComment(cfg *config.Config, text string) error {
 	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor}
 	if r := roomClient.Room(); r != nil && r.Named {
-		p.Name = resolvedDisplayName(cfg)
+		p.Name = currentDisplayName() // 作成/参加時に確定済み
 	}
 	if err := roomClient.Send(p); err != nil {
 		// 送信エラーでも実際には届いていることがある(タイムアウト等)。
@@ -201,6 +208,13 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 		log.Println("⚠️ room.server が未設定です(config.json に中継サーバの URL を設定してください)")
 		return
 	}
+	// 記名ルームは作成前に表示名を確定する(未設定ならダイアログ)。キャンセルなら中止。
+	if named {
+		if _, ok := ensureDisplayName(cfg); !ok {
+			log.Println("⚠️ 表示名が未入力のため記名ルームの作成を中止しました。")
+			return
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	r, err := room.Create(ctx, cfg.Room.Server, named)
@@ -210,7 +224,7 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 	}
 	kind := "匿名"
 	if named {
-		kind = "記名(表示名: " + resolvedDisplayName(cfg) + ")"
+		kind = "記名(表示名: " + currentDisplayName() + ")"
 	}
 	if err := pbcopy(r.URL()); err != nil {
 		// コピーできなくても URL は必要なのでログに出す(鍵入りだが自分のログなので許容)。
@@ -221,16 +235,85 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 	roomClient.Join(r)
 }
 
-// resolvedDisplayName は記名ルームで名乗る表示名を決める。
-// config の display_name が空なら macOS のユーザー名にフォールバックする。
-func resolvedDisplayName(cfg *config.Config) string {
+// displayName は記名ルームで名乗る現在の表示名(空=未設定)。config か内部ファイル、
+// または作成/参加時のダイアログ入力で確定する。sendRoomComment(別 goroutine)からも
+// 読むので mutex で保護する。
+var (
+	displayNameMu sync.Mutex
+	displayName   string
+)
+
+func currentDisplayName() string {
+	displayNameMu.Lock()
+	defer displayNameMu.Unlock()
+	return displayName
+}
+
+func setDisplayName(n string) {
+	displayNameMu.Lock()
+	displayName = strings.TrimSpace(n)
+	displayNameMu.Unlock()
+}
+
+// ensureDisplayName は記名ルームに入る直前に表示名を確定する。config が設定されていれば
+// それを優先し、未設定で今も空ならダイアログで入力を促す(入力は内部ファイルに保存して
+// 次回以降は聞かない)。入力をキャンセルしたら (_,false) を返し、呼び出し側は中止する。
+func ensureDisplayName(cfg *config.Config) (string, bool) {
 	if n := strings.TrimSpace(cfg.Room.DisplayName); n != "" {
-		return n
+		setDisplayName(n) // config が最優先(内部ファイルより優先)
+		return n, true
 	}
-	if u, err := user.Current(); err == nil && u.Username != "" {
-		return u.Username
+	if n := currentDisplayName(); n != "" {
+		return n, true
 	}
-	return "匿名"
+	entered, ok := dialog.Prompt("表示名を入力",
+		"記名ルームでは各コメントの先頭にこの名前が付きます。",
+		"例: myk", "", "決定")
+	if !ok {
+		return "", false
+	}
+	n := strings.TrimSpace(entered)
+	if n == "" {
+		return "", false
+	}
+	setDisplayName(n)
+	saveStoredName(n) // 次回以降は聞かない(config とは別の内部ファイル)
+	return n, true
+}
+
+// stateDir は表示名などの内部状態を置くディレクトリ(多重起動ロックと同じ場所)。
+func stateDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	d := filepath.Join(home, "Library", "Application Support", "ura-talk")
+	if err := os.MkdirAll(d, 0o755); err != nil {
+		return "", err
+	}
+	return d, nil
+}
+
+// loadStoredName は前回入力した表示名を読む(無ければ空)。
+func loadStoredName() string {
+	d, err := stateDir()
+	if err != nil {
+		return ""
+	}
+	b, err := os.ReadFile(filepath.Join(d, "display_name"))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// saveStoredName は表示名を内部ファイルに保存する(config には書かない)。
+func saveStoredName(name string) {
+	d, err := stateDir()
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(d, "display_name"), []byte(name), 0o600)
 }
 
 // joinRoomWithDialog は共有 URL の入力ダイアログを出して参加する。
@@ -255,7 +338,11 @@ func joinRoomWithDialog(cfg *config.Config) {
 		return
 	}
 	if r.Named {
-		log.Printf("ℹ️ 記名ルームに参加します(あなたの表示名: %s)。", resolvedDisplayName(cfg))
+		if _, ok := ensureDisplayName(cfg); !ok {
+			log.Println("⚠️ 表示名が未入力のため記名ルームへの参加を中止しました。")
+			return
+		}
+		log.Printf("ℹ️ 記名ルームに参加します(あなたの表示名: %s)。", currentDisplayName())
 	}
 	roomClient.Join(r)
 }
