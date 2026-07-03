@@ -1,21 +1,21 @@
-// ura-talk: グローバルなホットキーを押している間だけマイクを録音し、
-// 離すとローカルの whisper-cli で文字起こしして Slack に「自分名義」で投稿する常駐ツール。
+// ura-talk: グローバルなホットキーでマイクを録音し、ローカルの whisper-cli で
+// 文字起こしして、ニコニコ動画風の「流れるコメント」を画面全体のオーバーレイに出す
+// 常駐ツール。同じルームに参加したメンバー間でコメントを共有できる(中継サーバ経由)。
 //
-// 投稿には OAuth で取得した user token(xoxp)を使う。初回は `ura-talk login`
-// で認可してトークンを Keychain に保存する。
+// 発話・文字起こし・整形はすべてローカル完結。ルーム共有時も本文は E2E 暗号化され、
+// 中継サーバには暗号文しか渡らない(internal/room 参照)。
 //
 // 使い方:
 //
-//	ura-talk login     OAuth で認可し user token を取得・保存する
-//	ura-talk logout    保存済みトークンを削除する
-//	ura-talk           push-to-talk 常駐を開始する
-//	ura-talk dryrun    Slack に投稿せず、文字起こし結果をコンソールに出すだけ(動作確認用)
-//	ura-talk devices   利用可能な入力デバイス(マイク)の一覧を表示する
+//	ura-talk              常駐を開始する(メニューバーに常駐)
+//	ura-talk dryrun       送信せず、文字起こし結果をログに出すだけ(動作確認用)
+//	ura-talk devices      利用可能な入力デバイス(マイク)の一覧を表示する
+//	ura-talk keys         ホットキーに指定できるキー名の一覧を表示する
+//	ura-talk overlay-demo ルームを使わずオーバーレイの見た目だけ確認する
 package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -25,19 +25,14 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
 	"github.com/mykstmhr/ura-talk/internal/config"
 	"github.com/mykstmhr/ura-talk/internal/enhance"
-	"github.com/mykstmhr/ura-talk/internal/keystroke"
 	"github.com/mykstmhr/ura-talk/internal/modkey"
-	"github.com/mykstmhr/ura-talk/internal/oauth"
 	"github.com/mykstmhr/ura-talk/internal/overlay"
 	"github.com/mykstmhr/ura-talk/internal/recorder"
-	"github.com/mykstmhr/ura-talk/internal/slack"
-	"github.com/mykstmhr/ura-talk/internal/tokenstore"
 	"github.com/mykstmhr/ura-talk/internal/transcribe"
 	"github.com/mykstmhr/ura-talk/internal/trayicon"
 	"github.com/mykstmhr/ura-talk/internal/vad"
@@ -45,9 +40,6 @@ import (
 	"fyne.io/systray"
 	"golang.design/x/hotkey"
 )
-
-// userScopes は投稿に必要な user scope。
-var userScopes = []string{"chat:write"}
 
 // setupLogging は、.app バンドルから起動された場合にログを ~/Library/Logs/ura-talk.log へ出す。
 // Finder/launchd 起動では stdout が /dev/null(文字デバイス)になり stderr も失われるため、
@@ -84,10 +76,6 @@ func main() {
 		cmd = os.Args[1]
 	}
 	switch cmd {
-	case "login":
-		runLogin()
-	case "logout":
-		runLogout()
 	case "", "run":
 		startTray(false)
 	case "dryrun":
@@ -99,33 +87,9 @@ func main() {
 	case "overlay-demo":
 		runOverlayDemo()
 	default:
-		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [login|logout|run|dryrun|devices|keys|overlay-demo]\n", cmd)
+		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [run|dryrun|devices|keys|overlay-demo]\n", cmd)
 		os.Exit(2)
 	}
-}
-
-// runLogin は OAuth フローを実行し、user token を Keychain に保存する。
-func runLogin() {
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("設定エラー: %v", err)
-	}
-	if err := cfg.ValidateForLogin(); err != nil {
-		log.Fatalf("設定エラー: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-
-	res, err := oauth.Login(ctx, cfg.SlackClientID, cfg.SlackClientSecret,
-		cfg.RedirectURI(), userScopes, cfg.OAuthRedirectPort)
-	if err != nil {
-		log.Fatalf("OAuth 失敗: %v", err)
-	}
-	if err := tokenstore.Save(res.UserToken); err != nil {
-		log.Fatalf("トークン保存失敗: %v", err)
-	}
-	fmt.Printf("✅ 認証完了: %s (user: %s)。トークンを Keychain に保存しました。\n", res.TeamName, res.UserID)
 }
 
 // runDevices は利用可能な入力デバイスの一覧を表示する。
@@ -154,7 +118,7 @@ func runKeys() {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	fmt.Println("ホットキーは config の \"hotkey\" で変更できます:")
+	fmt.Println("ホットキーは config の \"hotkey\" / \"room.input_hotkey\" で変更できます:")
 	fmt.Println(`  "hotkey": { "mods": ["ctrl","shift"], "key": "space" }`)
 	fmt.Println()
 	fmt.Println("修飾キー(mods): ctrl, shift, option(alt), cmd")
@@ -166,6 +130,7 @@ func runKeys() {
 	fmt.Println("単体修飾キー(mods は空にして key に指定):")
 	fmt.Println("  " + strings.Join(mk, ", "))
 	fmt.Println(`  例: "hotkey": { "mods": [], "key": "rightcmd" }`)
+	fmt.Println(`  修飾キー2つのコードも可: "hotkey": { "mods": ["rightshift"], "key": "rightcmd" }`)
 	fmt.Println()
 	fmt.Println("変更後はアプリを再起動してください(.app はメニューバー→終了→再 open)。")
 }
@@ -203,191 +168,38 @@ func runOverlayDemo() {
 	}, func() { os.Exit(0) })
 }
 
-// runLogout は保存済みトークンを削除する。
-func runLogout() {
-	if err := tokenstore.Delete(); err != nil {
-		log.Fatalf("ログアウト失敗: %v", err)
-	}
-	fmt.Println("✅ トークンを削除しました。")
-}
-
-// output は文字起こし結果の出力先。send が nil ならドライラン(表示のみ)。
+// output は文字起こし結果の送り先。send が nil ならドライラン(表示のみ)。
 type output struct {
-	send   func(ctx context.Context, text string) error
-	name   string
-	prefix string // 本文の前に付ける文字列。keystroke では付けない(素のテキスト)。
+	send func(text string) error
+	name string
 }
 
-// buildOutput は設定とドライランフラグから出力先を決める。設定不備は fatal で止める。
-func buildOutput(cfg *config.Config, dryRun bool) output {
-	// 前置詞(🗣 等)は Slack 投稿のときだけ付ける。keystroke は自分が打ったままにしたいので付けない。
-	out := output{}
-	if cfg.Output == "slack" || cfg.Output == "" {
-		out.prefix = cfg.MessagePrefix
+// buildSink は送り先を決める。オーバーレイ(ルーム共有)固定。dryRun は送らず表示のみ。
+func buildSink(cfg *config.Config, dryRun bool) output {
+	if cfg.WhisperModel == "" {
+		log.Fatalf("設定エラー: whisper_model が未設定です(ggml モデルのパス)")
 	}
-
 	if dryRun {
-		if cfg.WhisperModel == "" {
-			log.Fatalf("設定エラー: whisper_model が未設定です(ggml モデルのパス)")
-		}
-		out.name = "dryrun"
-		return out // 表示のみ(send は nil)
+		return output{name: "ドライラン(送信しません)"} // send は nil
 	}
-
-	switch cfg.Output {
-	case "keystroke":
-		if cfg.WhisperModel == "" {
-			log.Fatalf("設定エラー: whisper_model が未設定です(ggml モデルのパス)")
-		}
-		if !keystroke.Trusted() {
-			log.Println("⚠️ アクセシビリティ権限がありません。許可ダイアログを表示します(システム設定が開きます)。")
-			log.Println("   一覧で ura-talk をオンにしてから、メニューバーの「終了」→ 再起動してください。")
-			keystroke.PromptAccessibility() // 一覧に正しい署名で自動登録し、システムの許可ダイアログを出す
-		}
-		if cfg.Keystroke.PinTarget {
-			log.Println("ℹ️ keystroke 出力(固定モード): リッスン開始時に最前面だったアプリが前面のときだけ貼り付けます。")
-			log.Println("   別アプリを前面にしている間はスキップします(誤爆防止)。対象を変えるにはリッスンを停止→入れたい欄にフォーカス→再開。")
-		} else {
-			log.Println("ℹ️ keystroke 出力: 貼り付けは「発話が終わった時点で最前面のアプリ」に入ります。")
-			log.Println("   入力したいチャットの入力欄にフォーカスを当てた状態で喋ってください(ターミナルを前面にしない)。")
-		}
-		out.name = "keystroke"
-		out.send = func(_ context.Context, text string) error {
-			dest := keystroke.CaptureFrontmost() // 今まさに貼り付く先(=最前面アプリ)
-			// expectPID>0 のとき Inject は Cmd+V 送出の直前に前面 PID を再確認する
-			// (判定〜送出間に前面が変わる TOCTOU 窓を詰める)。固定モードのときだけ設定。
-			expectPID := 0
-			if pinTargetOn.Load() {
-				t := pinnedSnapshot()
-				if t.PID > 0 && dest.PID != t.PID {
-					log.Printf("⏸ 固定先「%s」が前面にないため貼り付けをスキップしました。", t.Name)
-					return nil
-				}
-				if t.PID > 0 {
-					expectPID = t.PID
-				}
-			}
-			// 貼り付け先アプリに応じて送信キーを解決(override → 既定 send_key → auto_enter)。
-			sendKey := resolveSendKey(cfg, dest.Name, dest.BundleID)
-			err := keystroke.Inject(text, sendKey, cfg.Keystroke.SendDelayMs, expectPID)
-			if errors.Is(err, keystroke.ErrTargetChanged) {
-				log.Println("⏸ 貼り付け直前に前面が固定先から外れたためスキップしました。")
-				return nil
-			}
-			return err
-		}
-		return out
-	case "room":
-		if cfg.WhisperModel == "" {
-			log.Fatalf("設定エラー: whisper_model が未設定です(ggml モデルのパス)")
-		}
-		log.Println("ℹ️ room 出力: 発話はニコニコ風オーバーレイに流れます。メニューバーからルームを作成/参加できます。")
-		if cfg.Room.Server == "" {
-			log.Println("   room.server が未設定なのでソロモード(自分の画面のみ)で動きます。")
-		}
-		out.name = "room"
-		out.send = func(_ context.Context, text string) error {
-			return sendRoomComment(cfg, text)
-		}
-		return out
-	case "slack", "":
-		if err := cfg.ValidateForPost(); err != nil {
-			log.Fatalf("設定エラー: %v", err)
-		}
-		token, err := tokenstore.Load()
-		if err != nil {
-			log.Fatalf("トークン読み込みエラー: %v", err)
-		}
-		if token == "" {
-			log.Fatalf("user token がありません。先に `ura-talk login` で認可してください。")
-		}
-		sl := slack.New(token, cfg.SlackChannel)
-		out.name = "slack"
-		out.send = sl.Post
-		return out
-	default:
-		log.Fatalf("設定エラー: output は \"slack\" / \"keystroke\" / \"room\" のいずれかを指定してください(現在: %q)", cfg.Output)
-		return out
+	log.Println("ℹ️ 発話・入力はニコニコ風オーバーレイに流れます。メニューバーからルームを作成/参加できます。")
+	if cfg.Room.Server == "" {
+		log.Println("   room.server が未設定なのでソロモード(自分の画面のみ)で動きます。")
 	}
-}
-
-// resolveSendKey は実行時の auto_enter スイッチ(autoEnterOn)を尊重して送信キーを決める。
-// autoEnter が off なら常に none。on のときは config の send_key/overrides に従う
-// (config 側の auto_enter が false でもメニューで on にできるよう、一時的に true 扱いにする)。
-func resolveSendKey(cfg *config.Config, name, bundleID string) string {
-	if !autoEnterOn.Load() {
-		return "none"
+	return output{
+		name: "オーバーレイ",
+		send: func(text string) error { return sendRoomComment(cfg, text) },
 	}
-	k := cfg.Keystroke
-	k.AutoEnter = true
-	return k.SendKeyFor(name, bundleID)
 }
 
 // lockFile は多重起動防止のロックを保持する(プロセス終了まで開いたままにする)。
 var lockFile *os.File
 
-// pinnedTarget は keystroke 固定モードでの貼り付け先アプリ。リッスン/録音の開始時に
-// その時の最前面アプリで更新し、出力 goroutine から参照する(発話処理は並行するため mutex で保護)。
+// mStatus は状態(待機/聞き取り/録音…)。その下に動作情報(方式/キー)を常時表示する。
 var (
-	pinMu        sync.Mutex
-	pinnedTarget keystroke.Target
-)
-
-// pinTargetOn / autoEnterOn は keystroke 出力の「固定モード」「送信キー」スイッチの
-// 実行時の実体。起動時に config の値で初期化し、メニューバーからトグルできる。
-// 出力 goroutine とメニュー(tray)goroutine の両方から触るので atomic で保持する。
-var (
-	pinTargetOn atomic.Bool
-	autoEnterOn atomic.Bool
-)
-
-// capturePinTarget はリッスン/録音の開始時に最前面アプリを固定先として記憶し、
-// メニューバー(タイトル/ドロップダウン)にも反映する。固定モードでなければ何もしない。
-func capturePinTarget(cfg *config.Config) {
-	if cfg.Output != "keystroke" || !pinTargetOn.Load() {
-		return
-	}
-	t := keystroke.CaptureFrontmost()
-	pinMu.Lock()
-	pinnedTarget = t
-	pinMu.Unlock()
-	if t.PID <= 0 {
-		setPinLabel(idlePinPlaceholder)
-		log.Println("⚠️ 固定先アプリを取得できませんでした。最前面へ貼り付けます。")
-		return
-	}
-	setPinLabel(t.Name)
-	log.Printf("📍 貼り付け先を「%s」に固定しました。", t.Name)
-}
-
-// idlePinPlaceholder は固定モードで待機中(まだ固定先が確定していない)ときに
-// メニューバーへ出す「未指定」マーカー。これから確定する保留状態を控えめに表す。
-const idlePinPlaceholder = "⋯"
-
-// idlePinLabel は固定モードなら待機時のプレースホルダ、そうでなければ空(📍 を出さない)を返す。
-func idlePinLabel(cfg *config.Config) string {
-	if cfg.Output == "keystroke" && pinTargetOn.Load() {
-		return idlePinPlaceholder
-	}
-	return ""
-}
-
-// pinnedSnapshot は現在の固定先アプリを返す(出力 goroutine から安全に読むため)。
-func pinnedSnapshot() keystroke.Target {
-	pinMu.Lock()
-	defer pinMu.Unlock()
-	return pinnedTarget
-}
-
-// mStatus は状態(待機/聞き取り/録音…)。その下に動作情報(出力/方式/キー)を常時表示する。
-// mPinToggle / mAutoEnter は keystroke 出力時だけ出す設定トグル。
-var (
-	mStatus     *systray.MenuItem
-	mInfoOutput *systray.MenuItem
-	mInfoMode   *systray.MenuItem
-	mInfoKey    *systray.MenuItem
-	mPinToggle  *systray.MenuItem
-	mAutoEnter  *systray.MenuItem
+	mStatus   *systray.MenuItem
+	mInfoMode *systray.MenuItem
+	mInfoKey  *systray.MenuItem
 )
 
 // enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化。
@@ -412,20 +224,13 @@ func onReady(dryRun bool) func() {
 
 		mStatus = systray.AddMenuItem("起動中…", "現在の状態")
 		mStatus.Disable()
-		// 動作情報(出力/方式/キー)は状態の下に常時表示。内容は serve で確定して Show する。
-		mInfoOutput = newInfoItem()
+		// 動作情報(方式/キー)は状態の下に常時表示。内容は serve で確定して Show する。
 		mInfoMode = newInfoItem()
 		mInfoKey = newInfoItem()
 
 		systray.AddSeparator()
 
-		// keystroke 出力のときだけ serve から Show して有効化する設定トグル。ON/OFF はレ点で示す。
-		mPinToggle = systray.AddMenuItemCheckbox("入力先を固定 (pin_target)", "聞き取り開始時の最前面アプリだけに貼り付ける", false)
-		mPinToggle.Hide()
-		mAutoEnter = systray.AddMenuItemCheckbox("貼り付け後に送信 (auto_enter)", "貼り付け後に Enter などの送信キーを送る", false)
-		mAutoEnter.Hide()
-
-		// room 出力のときだけ serve から Show されるルーム操作メニュー。
+		// ルーム操作メニュー(serve から Show する)。
 		addRoomMenuItems()
 
 		systray.AddSeparator()
@@ -449,35 +254,7 @@ const (
 	iconTranscribe                  // 文字起こし中(吹き出し)
 )
 
-// pinLabel はメニューバーのタイトルに併記する固定先アプリ名(空なら併記しない)。
-// gate 判定に使う pinnedTarget とは独立した「表示専用」の値。
-var (
-	pinLabelMu sync.Mutex
-	pinLabel   string
-)
-
-// setPinLabel はメニューバーのタイトルに併記する固定先名を差し替える。メニューからの
-// トグルでもすぐ反映されるよう、setState を待たずここでタイトルを塗り直す。
-// 固定先はドロップダウンには出さず(メニューバーのタイトルに出るので冗長)、タイトルのみ更新する。
-func setPinLabel(name string) {
-	pinLabelMu.Lock()
-	pinLabel = name
-	pinLabelMu.Unlock()
-	systray.SetTitle(pinTitle())
-}
-
-// pinTitle は現在の固定先アプリ名(長すぎは丸める)。未設定なら空。アイコンとの間に余白を足す。
-func pinTitle() string {
-	pinLabelMu.Lock()
-	name := pinLabel
-	pinLabelMu.Unlock()
-	if name == "" {
-		return ""
-	}
-	return " " + truncRunes(name, 16) // 📍 は付けずアプリ名だけ併記する
-}
-
-// truncRunes は menubar が長くなりすぎないよう name を max 文字に丸める(超過分は …)。
+// truncRunes は表示が長くなりすぎないよう name を max 文字に丸める(超過分は …)。
 func truncRunes(s string, max int) string {
 	r := []rune(s)
 	if len(r) <= max {
@@ -486,7 +263,7 @@ func truncRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// newInfoItem は状態下の動作情報行(出力/方式/キー)を 1 つ作る。無効・初期は非表示。
+// newInfoItem は状態下の動作情報行(方式/キー)を 1 つ作る。無効・初期は非表示。
 // 内容が確定する serve で setInfo により文言をセットして表示する。
 func newInfoItem() *systray.MenuItem {
 	it := systray.AddMenuItem("", "")
@@ -504,59 +281,9 @@ func setInfo(item *systray.MenuItem, text string) {
 	item.Show()
 }
 
-// setupToggleMenus は keystroke 出力のとき、固定モード / 送信キーのトグルを表示して配線する。
-// slack 出力など keystroke 以外では意味がないので隠したままにする。serve から一度だけ呼ぶ。
-// ON/OFF は macOS 標準のチェックマーク(左のレ点)だけで示す — ラベルに ON/✅ を足すと冗長。
-func setupToggleMenus(cfg *config.Config) {
-	if cfg.Output != "keystroke" || mPinToggle == nil || mAutoEnter == nil {
-		return
-	}
-	syncCheck(mPinToggle, pinTargetOn.Load())
-	syncCheck(mAutoEnter, autoEnterOn.Load())
-	mPinToggle.Show()
-	mAutoEnter.Show()
-
-	go func() {
-		for range mPinToggle.ClickedCh {
-			on := !pinTargetOn.Load()
-			pinTargetOn.Store(on)
-			syncCheck(mPinToggle, on)
-			if on {
-				log.Println("📍 固定モードを ON にしました(次のリッスン開始時の最前面アプリに固定)。")
-			} else {
-				log.Println("📍 固定モードを OFF にしました(発話終了時の最前面アプリに貼り付け)。")
-			}
-			setPinLabel(idlePinLabel(cfg)) // 待機表示を新しい設定に合わせて更新
-		}
-	}()
-
-	go func() {
-		for range mAutoEnter.ClickedCh {
-			on := !autoEnterOn.Load()
-			autoEnterOn.Store(on)
-			syncCheck(mAutoEnter, on)
-			if on {
-				log.Println("↵ 送信キーを ON にしました(貼り付け後に送信キーを送る)。")
-			} else {
-				log.Println("↵ 送信キーを OFF にしました(貼り付けのみ・送信しない)。")
-			}
-		}
-	}()
-}
-
-// syncCheck はチェックボックス項目のレ点を on/off に合わせる。
-func syncCheck(item *systray.MenuItem, on bool) {
-	if on {
-		item.Check()
-	} else {
-		item.Uncheck()
-	}
-}
-
-// setState は状態アイコンと、タイトル(固定先名)・ドロップダウンの状態テキストを更新する。
+// setState は状態アイコンとドロップダウンの状態テキストを更新する。
 func setState(state iconState, text string) {
 	applyIcon(state)
-	systray.SetTitle(pinTitle())
 	if mStatus != nil {
 		mStatus.SetTitle(text)
 	}
@@ -693,24 +420,21 @@ func acquireSingleInstance() bool {
 	return true
 }
 
-// serve は本体処理:設定読込→出力先決定→録音・ホットキー→常駐ループ。
-// systray のメインループ上(別 goroutine)で動く。dryRun のときは出力せず表示のみ。
+// serve は本体処理:設定読込→送り先決定→録音・ホットキー→常駐ループ。
+// systray のメインループ上(別 goroutine)で動く。dryRun のときは送らず表示のみ。
 func serve(dryRun bool) {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("設定エラー: %v", err)
 	}
 
-	// 実行時スイッチを config の値で初期化し、keystroke 出力ならメニューのトグルを配線する。
-	pinTargetOn.Store(cfg.Keystroke.PinTarget)
-	autoEnterOn.Store(cfg.Keystroke.AutoEnter)
-	setupToggleMenus(cfg)
-	if cfg.Output == "room" && !dryRun {
+	// オーバーレイ・入力バー・ルームメニューを配線する(dryRun では画面に出さない)。
+	if !dryRun {
 		setupRoom(cfg)
 	}
 
-	// 出力先(sink)を決める。dryRun は出力せず表示のみ(out.send == nil)。
-	out := buildOutput(cfg, dryRun)
+	// 送り先(sink)を決める。dryRun は送らず表示のみ(out.send == nil)。
+	out := buildSink(cfg, dryRun)
 
 	// 文字起こし整形/絵文字付与(ローカル LLM)。無効でも New は安全。
 	enhancer = enhance.New(enhance.Config{
@@ -779,32 +503,26 @@ func serve(dryRun bool) {
 	}
 	defer stopTrigger()
 
-	dst := out.name
-	if dryRun {
-		dst = "ドライラン(出力しません)"
-	}
-	setPinLabel(idlePinLabel(cfg)) // 固定モードなら起動時から ⋯ を出す(未 arm)
-
-	// 状態の下に動作情報を常時表示(出力/方式/キー)。全角キーで幅を揃える。
-	setInfo(mInfoOutput, "出力 : "+dst)
+	// 状態の下に動作情報を常時表示(方式/キー)。全角キーで幅を揃える。
 	setInfo(mInfoKey, "キー : "+cfg.Hotkey.String())
 
 	if cfg.ListenMode == "vad" {
-		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして出力します。", dst, cfg.Hotkey)
+		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Hotkey)
 		setInfo(mInfoMode, "方式 : VAD(自動区切り)")
 		tray.setBase(iconIdle, "待機中…")
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
-	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", dst, cfg.Hotkey)
+	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Hotkey)
 	setInfo(mInfoMode, "方式 : PTT(押している間だけ)")
 	tray.setBase(iconIdle, "待機中…")
 	pttLoop(rec, wh, out, cfg, down, up)
 }
 
 // buildTrigger はホットキーを設定から組み立て、押下(down)/解放(up)を流すチャネルを返す。
-// 単体修飾キー(rightcmd 等)なら CGEventTap、組み合わせなら golang.design/x/hotkey を使う。
+// 単体修飾キー(rightcmd 等)や修飾キー 2 つのコードなら CGEventTap、それ以外は
+// golang.design/x/hotkey を使う。
 func buildTrigger(cfg *config.Config) (down, up <-chan struct{}, stop func(), err error) {
 	d := make(chan struct{}, 8)
 	u := make(chan struct{}, 8)
@@ -896,7 +614,7 @@ func playSound(name string) {
 	go func() { _ = cmd.Wait() }()
 }
 
-// pttLoop は push-to-talk:押している間だけ録音し、離したら 1 回出力する。
+// pttLoop は push-to-talk:押している間だけ録音し、離したら 1 回流す。
 func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down, up <-chan struct{}) {
 	for {
 		<-down
@@ -904,14 +622,12 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			log.Printf("録音開始失敗: %v", err)
 			continue
 		}
-		capturePinTarget(cfg) // 固定先を記憶(タイトル/ドロップダウンにも反映)
 		log.Println("● 録音中...")
 		tray.setBase(iconRec, "● 録音中…")
 		playOn(cfg)
 
 		<-up
 		pcm, durMs, err := rec.Stop()
-		setPinLabel(idlePinLabel(cfg)) // 待機に戻ったら固定先表示は --- に(判定用 pinnedTarget は残す)
 		tray.setBase(iconIdle, "待機中…")
 		playOff(cfg)
 		if err != nil {
@@ -929,7 +645,7 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	}
 }
 
-// vadLoop はキーでリッスンをトグルし、その間ストリームを無音で発話単位に区切って出力する。
+// vadLoop はキーでリッスンをトグルし、その間ストリームを無音で発話単位に区切って流す。
 func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down <-chan struct{}) {
 	debug := os.Getenv("URATALK_DEBUG") != ""
 	seg := vad.New(vad.Config{
@@ -956,83 +672,27 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	}
 
 	listening := false
-	focusLost := make(chan struct{}, 1) // 監視 goroutine → 固定先が前面から外れた通知
-	var watchStop chan struct{}         // 監視 goroutine の停止チャネル(nil=監視なし)
-
-	// stopListening はリッスンを止めて待機へ戻す(手動キー・フォーカス変化の両方から呼ぶ)。
-	stopListening := func() {
-		rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
-		seg.Flush()
-		listening = false
-		if watchStop != nil {
-			close(watchStop)
-			watchStop = nil
-		}
-		setPinLabel(idlePinLabel(cfg)) // 固定先表示は待機へ(判定用 pinnedTarget は残す)
-		tray.setBase(iconIdle, "待機中…")
-		playOff(cfg)
-	}
-
 	for {
 		if !listening {
 			<-down
-			select { // 前回の取りこぼし通知が残っていれば捨てる
-			case <-focusLost:
-			default:
-			}
 			if err := rec.StartStream(seg.Feed); err != nil {
 				log.Printf("リッスン開始失敗: %v", err)
 				continue
 			}
 			listening = true
-			capturePinTarget(cfg)                       // 固定先を記憶(タイトル/ドロップダウンにも反映)
-			watchStop = startFocusWatch(cfg, focusLost) // 固定モードなら前面監視を開始
-			log.Println("🎙 リッスン開始(話すと自動で区切って投稿。もう一度キーで停止)")
+			log.Println("🎙 リッスン開始(話すと自動で区切って流す。もう一度キーで停止)")
 			tray.setBase(iconListen, "聞き取り中(無音待ち)…")
 			playOn(cfg)
 			continue
 		}
-		select {
-		case <-down: // 手動でトグル停止
-			log.Println("■ リッスン停止")
-			stopListening()
-		case <-focusLost: // 固定先から離れたので自動停止(安全側)
-			log.Println("■ フォーカスが固定先から外れたためリッスンを停止しました(再度キーで再開)")
-			stopListening()
-		}
+		<-down // 手動でトグル停止
+		log.Println("■ リッスン停止")
+		rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
+		seg.Flush()
+		listening = false
+		tray.setBase(iconIdle, "待機中…")
+		playOff(cfg)
 	}
-}
-
-// startFocusWatch は固定モードのとき、最前面が固定先 PID から外れたら focusLost に通知する
-// 監視 goroutine を起動し、その停止チャネルを返す。固定モードでない/対象未取得なら nil。
-func startFocusWatch(cfg *config.Config, focusLost chan struct{}) chan struct{} {
-	if cfg.Output != "keystroke" || !pinTargetOn.Load() {
-		return nil
-	}
-	target := pinnedSnapshot()
-	if target.PID <= 0 {
-		return nil // 対象が取れていない(従来どおり最前面へ)なら監視しない
-	}
-	stop := make(chan struct{})
-	go func() {
-		t := time.NewTicker(250 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				if keystroke.FrontmostPID() != target.PID {
-					select {
-					case focusLost <- struct{}{}:
-					default:
-					}
-					return
-				}
-			}
-		}
-	}()
-	return stop
 }
 
 // logBodyEnabled は発話本文をログに出してよいか(URATALK_DEBUG が設定されているか)。
@@ -1051,8 +711,8 @@ func bodyForLog(s string) string {
 	return fmt.Sprintf("(%d文字)", len([]rune(s)))
 }
 
-// handle は 1 回の発話(PCM)を正規化・文字起こしして出力先へ渡す。
-// out.send が nil のときは出力せず、文字起こし結果を表示するだけ(ドライラン)。
+// handle は 1 回の発話(PCM)を正規化・文字起こしして送り先へ渡す。
+// out.send が nil のときは送らず、文字起こし結果を表示するだけ(ドライラン)。
 func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 	// 文字起こし中はアイコンを「💬」にし、終わったら基本状態へ戻す。
 	tray.beginTranscribe()
@@ -1105,22 +765,19 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 		}
 	}
 
-	msg := out.prefix + text
 	if out.send == nil {
-		// ドライランは「出力せず結果を目視確認する」のが目的なので本文を出す
+		// ドライランは「送らず結果を目視確認する」のが目的なので本文を出す
 		// (端末での動作確認用モード。通常運用の常時ログとは別)。
-		log.Printf("(ドライラン)文字起こし結果: %s", msg)
+		log.Printf("(ドライラン)文字起こし結果: %s", text)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := out.send(ctx, msg); err != nil {
-		log.Printf("出力失敗(%s): %v", out.name, err)
+	if err := out.send(text); err != nil {
+		log.Printf("送信失敗(%s): %v", out.name, err)
 		return
 	}
 	// 発話本文は既定でログに残さない(URATALK_DEBUG のときだけ本文を出す)。
-	log.Printf("→ %s: %s", out.name, bodyForLog(msg))
+	log.Printf("→ %s: %s", out.name, bodyForLog(text))
 }
 
 // parseHotkey は設定の文字列を hotkey ライブラリの型に変換する。

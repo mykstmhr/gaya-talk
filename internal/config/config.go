@@ -1,6 +1,5 @@
 // Package config はアプリ設定の読み込みを担う。
-// 機密値(client_secret)やモデルパスは環境変数でも上書きできる。
-// user token(xoxp)は config には置かず、Keychain に保存する(tokenstore 参照)。
+// モデルパスなどは環境変数でも上書きできる。
 package config
 
 import (
@@ -11,24 +10,11 @@ import (
 	"strings"
 )
 
-// Config はアプリ全体の設定。
+// Config はアプリ全体の設定。発話・入力はニコニコ風オーバーレイに流れ、
+// ルーム(中継サーバ)を介してメンバーと共有できる。
 type Config struct {
-	// Slack アプリの Client ID / Client Secret(OAuth 用)。
-	SlackClientID     string `json:"slack_client_id"`
-	SlackClientSecret string `json:"slack_client_secret"`
-	// 出力先。"slack"(chat.postMessage で自分名義投稿)、
-	// "keystroke"(フォーカス中のフィールドへ合成入力)、
-	// "room"(ニコニコ風オーバーレイをメンバー間で共有)。
-	Output string `json:"output"`
-	// keystroke 出力の設定。
-	Keystroke KeystrokeConfig `json:"keystroke"`
-	// room 出力の設定。
+	// room(オーバーレイ共有)の設定。
 	Room RoomConfig `json:"room"`
-
-	// 投稿先チャンネル(チャンネル ID "C0123..." 推奨。"#general" でも可)。output が "slack" のとき必須。
-	SlackChannel string `json:"slack_channel"`
-	// OAuth コールバックを受けるローカル HTTPS サーバのポート。
-	OAuthRedirectPort int `json:"oauth_redirect_port"`
 
 	// whisper-cli の実行パス(PATH 上にあれば "whisper-cli" のままで良い)。
 	WhisperBin string `json:"whisper_bin"`
@@ -63,85 +49,9 @@ type Config struct {
 	Sound SoundConfig `json:"sound"`
 	// この長さ未満の録音は無視する(ptt の誤爆防止)。
 	MinDurationMs int `json:"min_duration_ms"`
-	// Slack 投稿時に本文の先頭へ付ける接頭辞(例 "🗣 ")。
-	MessagePrefix string `json:"message_prefix"`
 }
 
-// KeystrokeConfig は合成入力(keystroke)出力の設定。
-type KeystrokeConfig struct {
-	// AutoEnter は「貼り付け後にキーを送るか」の最上位スイッチ。
-	// false なら何も送らない(send_key / overrides も無視)。true のときだけ下の設定が効く。
-	AutoEnter bool `json:"auto_enter"`
-	// SendKey は auto_enter=true のときに送るキー: enter|shift+enter|cmd+enter|none。
-	// 空なら enter。
-	SendKey string `json:"send_key"`
-	// SendDelayMs は貼り付け(Cmd+V)から送信キーを送るまでの待ち時間(ミリ秒)。
-	// Notion/Cosense 等のブラウザ製エディタはペースト処理が非同期で重く、短すぎると
-	// Enter がペースト確定前に届いてリスト継続にならない。0 以下なら既定(40ms)。
-	SendDelayMs int  `json:"send_delay_ms"`
-	PinTarget   bool `json:"pin_target"` // リッスン開始時に最前面だったアプリを固定し、そのアプリが前面のときだけ貼り付けるか
-	// Overrides はアプリ別の送信キー上書き。貼り付け先アプリが app に一致すれば
-	// その send_key を使う(Slack は enter で送信、別アプリは cmd+enter、ドキュメントは enter で改行、等)。
-	Overrides []KeystrokeOverride `json:"overrides"`
-}
-
-// KeystrokeOverride はアプリ別の送信キー上書き 1 件。
-type KeystrokeOverride struct {
-	App     string `json:"app"`      // アプリ名(メニューバーの 🎯 表示名)または bundle id。大文字小文字は無視。
-	SendKey string `json:"send_key"` // このアプリでの送信キー: none|enter|shift+enter|cmd+enter
-}
-
-// SendKeyFor は貼り付け先アプリ(表示名 name / bundle id bundleID)に送る送信キーを
-// 正規化して返す(none|enter|shift+enter|cmd+enter)。
-// auto_enter が最上位スイッチ: false なら常に none(何も送らない)。true のときだけ
-// 既定 enter → 全体 send_key → 一致する override の send_key、の順で上書きして決める。
-func (k KeystrokeConfig) SendKeyFor(name, bundleID string) string {
-	if !k.AutoEnter {
-		return "none"
-	}
-	key := "enter" // auto_enter=true の既定キー
-	if s := normalizeSendKey(k.SendKey); s != "" {
-		key = s
-	}
-	for _, o := range k.Overrides {
-		if matchApp(o.App, name, bundleID) {
-			if s := normalizeSendKey(o.SendKey); s != "" {
-				key = s
-			}
-			break
-		}
-	}
-	return key
-}
-
-// normalizeSendKey は send_key の表記ゆれを正規トークンへ。未指定/不明は ""(=既定にフォールバック)。
-func normalizeSendKey(s string) string {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "":
-		return ""
-	case "none", "off", "no", "false":
-		return "none"
-	case "enter", "return", "cr", "↵":
-		return "enter"
-	case "shift+enter", "shift+return", "shift-enter", "⇧↵":
-		return "shift+enter"
-	case "cmd+enter", "cmd+return", "command+enter", "meta+enter", "super+enter", "⌘↵":
-		return "cmd+enter"
-	default:
-		return "" // 不明な指定は既定にフォールバック(タイプミスで送信が壊れないように)
-	}
-}
-
-// matchApp は override の app 指定が貼り付け先(表示名 or bundle id)に一致するかを返す(大文字小文字無視の完全一致)。
-func matchApp(pat, name, bundleID string) bool {
-	pat = strings.ToLower(strings.TrimSpace(pat))
-	if pat == "" {
-		return false
-	}
-	return pat == strings.ToLower(name) || pat == strings.ToLower(bundleID)
-}
-
-// RoomConfig は room 出力(ニコニコ風オーバーレイ共有)の設定。
+// RoomConfig は room(ニコニコ風オーバーレイ共有)の設定。
 type RoomConfig struct {
 	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://ura-talk-room.<name>.workers.dev"。
 	// 空でもオーバーレイ自体は動く(ルーム未参加=自分の画面にだけ流れるソロモード)。
@@ -206,30 +116,21 @@ func (h Hotkey) String() string {
 	return strings.Join(append(append([]string{}, h.Mods...), h.Key), "+")
 }
 
-// RedirectURI は OAuth のコールバック URL を組み立てる。Slack の仕様上 HTTPS 必須。
-func (c *Config) RedirectURI() string {
-	return fmt.Sprintf("https://localhost:%d/oauth/callback", c.OAuthRedirectPort)
-}
-
 // Load は設定を読み込む。検索順は環境変数 URATALK_CONFIG → ./config.json →
 // ~/.config/ura-talk/config.json。見つからない項目はデフォルトを使う。
-// 必須項目の検証はコマンドごとに ValidateForPost / ValidateForLogin で行う。
 func Load() (*Config, error) {
 	cfg := &Config{
-		OAuthRedirectPort: 53682,
-		Output:            "slack",
-		WhisperBin:        "whisper-cli",
-		Language:          "ja",
-		MinDurationMs:     300,
-		MessagePrefix:     "🗣 ",
-		ListenMode:        "ptt",
-		WhisperBeamSize:   5,
-		Gain:              GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
-		Enhance:           EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
-		Emoji:             EmojiConfig{Mode: "off"},
-		Hotkey:            Hotkey{Mods: nil, Key: "rightcmd"},
-		Room:              RoomConfig{InputHotkey: Hotkey{Mods: nil, Key: "rightoption"}},
-		Sound:             SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
+		WhisperBin:      "whisper-cli",
+		Language:        "ja",
+		MinDurationMs:   300,
+		ListenMode:      "ptt",
+		WhisperBeamSize: 5,
+		Gain:            GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
+		Enhance:         EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
+		Emoji:           EmojiConfig{Mode: "off"},
+		Hotkey:          Hotkey{Mods: nil, Key: "rightcmd"},
+		Room:            RoomConfig{InputHotkey: Hotkey{Mods: []string{"rightshift"}, Key: "rightcmd"}},
+		Sound:           SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
 		VAD: VADConfig{
 			Threshold:    0.01,
 			MinSpeechMs:  300,
@@ -256,36 +157,11 @@ func Load() (*Config, error) {
 		}
 	}
 
-	if v := os.Getenv("URATALK_SLACK_CLIENT_SECRET"); v != "" {
-		cfg.SlackClientSecret = v
-	}
 	if v := os.Getenv("URATALK_WHISPER_MODEL"); v != "" {
 		cfg.WhisperModel = v
 	}
 	cfg.WhisperModel = expandHome(cfg.WhisperModel)
 	return cfg, nil
-}
-
-// ValidateForLogin は `login` サブコマンドに必要な項目を検証する。
-func (c *Config) ValidateForLogin() error {
-	if c.SlackClientID == "" {
-		return fmt.Errorf("slack_client_id が未設定です")
-	}
-	if c.SlackClientSecret == "" {
-		return fmt.Errorf("slack_client_secret が未設定です(config.json か URATALK_SLACK_CLIENT_SECRET)")
-	}
-	return nil
-}
-
-// ValidateForPost は通常起動(録音→投稿)に必要な項目を検証する。
-func (c *Config) ValidateForPost() error {
-	if c.SlackChannel == "" {
-		return fmt.Errorf("slack_channel が未設定です")
-	}
-	if c.WhisperModel == "" {
-		return fmt.Errorf("whisper_model が未設定です(ggml モデルのパス)")
-	}
-	return nil
 }
 
 // expandHome は先頭の "~" をホームディレクトリに展開する。

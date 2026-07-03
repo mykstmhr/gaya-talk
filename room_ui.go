@@ -1,5 +1,5 @@
-// room 出力(ニコニコ風オーバーレイ共有)のメニュー配線と送受信。
-// output が "room" のときだけ setupRoom で有効化される。
+// room(ニコニコ風オーバーレイ共有)のメニュー配線と送受信。
+// serve から setupRoom で初期化される(dryRun 時を除く)。
 package main
 
 import (
