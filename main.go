@@ -277,6 +277,19 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 			return err
 		}
 		return out
+	case "room":
+		if cfg.WhisperModel == "" {
+			log.Fatalf("設定エラー: whisper_model が未設定です(ggml モデルのパス)")
+		}
+		log.Println("ℹ️ room 出力: 発話はニコニコ風オーバーレイに流れます。メニューバーからルームを作成/参加できます。")
+		if cfg.Room.Server == "" {
+			log.Println("   room.server が未設定なのでソロモード(自分の画面のみ)で動きます。")
+		}
+		out.name = "room"
+		out.send = func(_ context.Context, text string) error {
+			return sendRoomComment(cfg, text)
+		}
+		return out
 	case "slack", "":
 		if err := cfg.ValidateForPost(); err != nil {
 			log.Fatalf("設定エラー: %v", err)
@@ -293,7 +306,7 @@ func buildOutput(cfg *config.Config, dryRun bool) output {
 		out.send = sl.Post
 		return out
 	default:
-		log.Fatalf("設定エラー: output は \"slack\" か \"keystroke\" を指定してください(現在: %q)", cfg.Output)
+		log.Fatalf("設定エラー: output は \"slack\" / \"keystroke\" / \"room\" のいずれかを指定してください(現在: %q)", cfg.Output)
 		return out
 	}
 }
@@ -411,6 +424,9 @@ func onReady(dryRun bool) func() {
 		mPinToggle.Hide()
 		mAutoEnter = systray.AddMenuItemCheckbox("貼り付け後に送信 (auto_enter)", "貼り付け後に Enter などの送信キーを送る", false)
 		mAutoEnter.Hide()
+
+		// room 出力のときだけ serve から Show されるルーム操作メニュー。
+		addRoomMenuItems()
 
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
@@ -689,6 +705,9 @@ func serve(dryRun bool) {
 	pinTargetOn.Store(cfg.Keystroke.PinTarget)
 	autoEnterOn.Store(cfg.Keystroke.AutoEnter)
 	setupToggleMenus(cfg)
+	if cfg.Output == "room" && !dryRun {
+		setupRoom(cfg)
+	}
 
 	// 出力先(sink)を決める。dryRun は出力せず表示のみ(out.send == nil)。
 	out := buildOutput(cfg, dryRun)
@@ -801,11 +820,12 @@ func buildTrigger(cfg *config.Config) (down, up <-chan struct{}, stop func(), er
 	}
 
 	if len(cfg.Hotkey.Mods) == 0 && modkey.Is(keyName) {
-		if err := modkey.Start(keyName); err != nil {
+		events, err := modkey.Watch(keyName)
+		if err != nil {
 			return nil, nil, nil, err
 		}
 		go func() {
-			for pressed := range modkey.Events() {
+			for pressed := range events {
 				if pressed {
 					send(d)
 				} else {

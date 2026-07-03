@@ -4,7 +4,7 @@
 
 イメージは「**副音声**」。Gather / Google Meet などの会議でミュート中に、本線を邪魔せず相槌・短いコメントを声でそっと流す用途。ビデオツール非依存でどのアプリでも使える。
 
-- **出力先**: `keystroke`(フォーカス先に入力・既定) / `slack`(自分名義で投稿)
+- **出力先**: `keystroke`(フォーカス先に入力・既定) / `slack`(自分名義で投稿) / `room`(ニコニコ風の流れるコメントをメンバー間で共有)
 - **入力方式**: `vad`(無音で自動区切り・既定) / `ptt`(押している間だけ録音)
 - 音声処理はローカル完結。メニューバー常駐(マイクのアイコン。聞き取り中はオレンジ)。設定の一部はメニューバーから切り替え可。
 
@@ -83,6 +83,17 @@ make app-open              # .app をビルドして起動。初回はマイク/
 > }
 > ```
 > 解決順: **`auto_enter: false` → 常に `none`。`true` のときだけ 既定 `enter` → 全体 `send_key` → 一致する override の `send_key`** の順で上書き。`app` は**貼り付け先アプリの表示名**(例 `Slack`)か **bundle id**(例 `com.google.Chrome`)で、大文字小文字は無視・完全一致。bundle id は `osascript -e 'id of app "Slack"'` で調べられる。固定モードでなくても(前面アプリ判定で)効く。なお `auto_enter` はメニューバーからも ON/OFF できる(そのときの送信キーは `send_key` / `overrides` に従う)。
+
+### 出力先: room(ニコニコ風コメント共有)
+
+`output: "room"` で、発話(と `右⌥` で出る入力バーからのタイプ入力)が**画面全体に重なる透過レイヤーをニコニコ動画風に右から左へ流れる**。Gather / Meet / Zoom などツールを問わず、どのアプリの上にも流れる(クリックは全て下のアプリへ素通し)。設計の詳細は [docs/room-overlay-design.md](docs/room-overlay-design.md)。
+
+- **メンバーと共有する**: メニューバー →「ルームを作成して URL をコピー」で共有 URL が発行される。メンバーは URL をコピーしてメニューバー →「クリップボードの URL で参加」するだけ(アカウント・認証不要)。全員のコメントが全員の画面に流れる。
+- **プライバシー**: 本文は AES-GCM で E2E 暗号化され、鍵は URL のフラグメント(`#k=…`)にだけ載る。中継サーバ(Cloudflare)には暗号文しか渡らず、何も保存されない。ルームはアイドルで自然消滅する。
+- **画面共有に映らない**: オーバーレイと入力バーは `sharingType=None` のため、会議の画面共有・収録・スクリーンショットに映らない(裏トークが相手に見えない)。
+- **ソロモード**: ルーム未参加(または `room.server` 未設定)でも、自分のコメントが自分の画面に流れる。見た目だけ試すなら `./bin/ura-talk overlay-demo`。
+- **匿名**: コメントに名前は付かない。起動ごとにランダムな色が割り当てられ、同一人物の発言は色で追える。
+- **中継サーバ**: `server/` を自分の Cloudflare アカウントにデプロイして使う(無料枠で収まる想定)。手順は [server/README.md](server/README.md)。デプロイした URL を config の `room.server` に設定する。
 
 ### 入力方式: PTT と VAD
 
@@ -183,6 +194,9 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | `keystroke.send_delay_ms` | 貼り付け(Cmd+V)から送信キーを送るまでの待ち(ms)。Notion/Cosense 等でリスト継続にならないなら `200`〜`300` に上げる。0 で既定(40ms) | `0` |
 | `keystroke.pin_target` | リッスン開始時に最前面だったアプリを固定し、**そのアプリが前面のときだけ**貼り付ける(別アプリ前面時はスキップ=誤爆防止)。VAD は固定先から前面が外れると自動でリッスン停止。`false` は従来どおり最前面へ貼り付け。メニューバーからも ON/OFF 可 | `false` |
 | `keystroke.overrides` | アプリ別の送信キー上書き。`[{ "app": "Slack", "send_key": "enter" }]` の形。`app` はアプリ表示名か bundle id(大文字小文字無視・完全一致) | `[]` |
+| `room.server` | room 出力の中継サーバ URL(`server/` のデプロイ先)。空ならソロモード | `""` |
+| `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式) | `rightoption` |
+| `room.display_name` | 記名モードのルームで名乗る表示名(空なら匿名) | `""` |
 | `slack_client_id` | Slack アプリの Client ID | (slack 出力の login に必須) |
 | `slack_client_secret` | Slack アプリの Client Secret | (login に必須) |
 | `slack_channel` | 投稿先チャンネル ID / 名前 | (投稿に必須) |
@@ -241,7 +255,8 @@ Go 1.26.4+ が必要(標準ライブラリの既知脆弱性の修正を含む�
 ## 構成
 
 ```
-main.go                          サブコマンド(login/logout/run/dryrun/devices/keys)・メニューバー常駐・PTT/VAD ループ
+main.go                          サブコマンド(login/logout/run/dryrun/devices/keys/overlay-demo)・メニューバー常駐・PTT/VAD ループ
+room_ui.go                       room 出力のメニュー配線・送受信(作成/参加/退出・ソロモードのフォールバック)
 internal/config/config.go        設定の読み込み・検証(JSONC)
 internal/oauth/oauth.go          OAuth v2 フロー(自己署名 HTTPS コールバック → user token)
 internal/tokenstore/store.go     user token の Keychain 保存・読み出し
@@ -251,8 +266,12 @@ internal/transcribe/whisper.go   whisper-cli 呼び出し(ローカル STT)・�
 internal/enhance/enhance.go      文字起こしをローカル LLM(Ollama)で整形・絵文字付与(任意)
 internal/slack/slack.go          chat.postMessage 投稿(本人名義)
 internal/keystroke/keystroke.go  フォーカス中のUIへ合成入力(Cmd+V 貼り付け / 任意で Enter)
-internal/modkey/modkey_darwin.go 単体修飾キー(右⌘ 等)の押下/解放を CGEventTap で検出
+internal/overlay/                ニコニコ風オーバーレイ(透過・クリック貫通・画面共有に映らない)
+internal/room/                   ルーム: 共有 URL・E2E 暗号化・自動再接続つき WS クライアント
+internal/inputbar/               Spotlight 風の文字入力バー(非アクティブ化パネル)
+internal/modkey/modkey_darwin.go 単体修飾キー(右⌘ 等)の押下/解放を CGEventTap で検出(複数キー監視可)
 internal/trayicon/trayicon.go    メニューバーのアイコン(待機/聞き取り=オレンジ/録音/文字起こし)
+server/                          ルームの中継サーバ(Cloudflare Workers + Durable Objects)
 ```
 
 ## 今後のアイデア

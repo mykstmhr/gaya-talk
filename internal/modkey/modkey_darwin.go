@@ -9,10 +9,13 @@ package modkey
 #cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation
 #include <ApplicationServices/ApplicationServices.h>
 
-extern void modkeyGoCallback(int down);
+extern void modkeyGoCallback(int idx, int down);
 
-static int gKeycode = -1;
-static unsigned long long gMask = 0;
+// 監視対象のキーは複数登録できる(メイントリガ + 入力バー等)。タップは 1 本を共有する。
+#define MODKEY_MAX 8
+static int gKeycodes[MODKEY_MAX];
+static unsigned long long gMasks[MODKEY_MAX];
+static int gNumKeys = 0;
 static CFMachPortRef gTap = NULL;
 
 static CGEventRef modkeyTap(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *ctx) {
@@ -23,47 +26,70 @@ static CGEventRef modkeyTap(CGEventTapProxy proxy, CGEventType type, CGEventRef 
     }
     if (type == kCGEventFlagsChanged) {
         int64_t kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
-        if ((int)kc == gKeycode) {
-            CGEventFlags flags = CGEventGetFlags(event);
-            modkeyGoCallback((flags & gMask) ? 1 : 0); // デバイス依存ビットで押下/解放を判定
+        CGEventFlags flags = CGEventGetFlags(event);
+        for (int i = 0; i < gNumKeys; i++) {
+            if ((int)kc == gKeycodes[i]) {
+                modkeyGoCallback(i, (flags & gMasks[i]) ? 1 : 0); // デバイス依存ビットで押下/解放を判定
+            }
         }
     }
     return event;
 }
 
-static int modkeyStart(int keycode, unsigned long long mask) {
-    gKeycode = keycode;
-    gMask = mask;
+// modkeyAdd は監視キーを 1 つ登録し、その添字を返す(満杯/タップ作成失敗は -1)。
+// 初回だけイベントタップを作り、以降は共有する。
+static int modkeyAdd(int keycode, unsigned long long mask) {
+    if (gNumKeys >= MODKEY_MAX) return -1;
     __block int rc = 0;
-    dispatch_sync(dispatch_get_main_queue(), ^{
-        CGEventMask m = CGEventMaskBit(kCGEventFlagsChanged);
-        CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-            kCGEventTapOptionListenOnly, m, modkeyTap, NULL);
-        if (!tap) { rc = -1; return; }
-        gTap = tap;
-        CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(NULL, tap, 0);
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
-        CGEventTapEnable(tap, true);
-    });
-    return rc;
+    if (!gTap) {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            CGEventMask m = CGEventMaskBit(kCGEventFlagsChanged);
+            CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+                kCGEventTapOptionListenOnly, m, modkeyTap, NULL);
+            if (!tap) { rc = -1; return; }
+            gTap = tap;
+            CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(NULL, tap, 0);
+            CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
+            CGEventTapEnable(tap, true);
+        });
+        if (rc != 0) return -1;
+    }
+    int idx = gNumKeys;
+    gKeycodes[idx] = keycode;
+    gMasks[idx] = mask;
+    gNumKeys = idx + 1;
+    return idx;
 }
 */
 import "C"
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
-var events = make(chan bool, 32)
+// watchers は登録順のチャネル(C 側の添字と対応)。コールバックと Watch の競合を守る。
+var (
+	watchMu  sync.Mutex
+	watchers []chan bool
+)
 
 //export modkeyGoCallback
-func modkeyGoCallback(down C.int) {
+func modkeyGoCallback(idx, down C.int) {
+	watchMu.Lock()
+	var ch chan bool
+	if int(idx) < len(watchers) {
+		ch = watchers[idx]
+	}
+	watchMu.Unlock()
+	if ch == nil {
+		return
+	}
 	select {
-	case events <- (down != 0):
+	case ch <- (down != 0):
 	default: // バッファが詰まっていたら捨てる(取りこぼしは許容)
 	}
 }
-
-// Events は押下(true)/解放(false)を流すチャネル。
-func Events() <-chan bool { return events }
 
 type key struct {
 	code int
@@ -95,14 +121,23 @@ func Names() []string {
 	return out
 }
 
-// Start は name の修飾キー監視を開始する(要アクセシビリティ権限)。
-func Start(name string) error {
+// Watch は name の修飾キー監視を開始し、押下(true)/解放(false)を流すチャネルを返す
+// (要アクセシビリティ権限)。複数キーを個別に監視できる(イベントタップは共有)。
+func Watch(name string) (<-chan bool, error) {
 	k, ok := keys[name]
 	if !ok {
-		return fmt.Errorf("未対応の修飾キー: %q", name)
+		return nil, fmt.Errorf("未対応の修飾キー: %q", name)
 	}
-	if C.modkeyStart(C.int(k.code), C.ulonglong(k.mask)) != 0 {
-		return fmt.Errorf("イベントタップの作成に失敗しました(アクセシビリティ権限が必要)")
+	watchMu.Lock()
+	defer watchMu.Unlock()
+	idx := int(C.modkeyAdd(C.int(k.code), C.ulonglong(k.mask)))
+	if idx < 0 {
+		return nil, fmt.Errorf("イベントタップの作成に失敗しました(アクセシビリティ権限が必要)")
 	}
-	return nil
+	ch := make(chan bool, 32)
+	for len(watchers) <= idx {
+		watchers = append(watchers, nil)
+	}
+	watchers[idx] = ch
+	return ch, nil
 }

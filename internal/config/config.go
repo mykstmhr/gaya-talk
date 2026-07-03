@@ -16,11 +16,14 @@ type Config struct {
 	// Slack アプリの Client ID / Client Secret(OAuth 用)。
 	SlackClientID     string `json:"slack_client_id"`
 	SlackClientSecret string `json:"slack_client_secret"`
-	// 出力先。"slack"(chat.postMessage で自分名義投稿)または
-	// "keystroke"(フォーカス中のフィールドへ合成入力)。
+	// 出力先。"slack"(chat.postMessage で自分名義投稿)、
+	// "keystroke"(フォーカス中のフィールドへ合成入力)、
+	// "room"(ニコニコ風オーバーレイをメンバー間で共有)。
 	Output string `json:"output"`
 	// keystroke 出力の設定。
 	Keystroke KeystrokeConfig `json:"keystroke"`
+	// room 出力の設定。
+	Room RoomConfig `json:"room"`
 
 	// 投稿先チャンネル(チャンネル ID "C0123..." 推奨。"#general" でも可)。output が "slack" のとき必須。
 	SlackChannel string `json:"slack_channel"`
@@ -138,6 +141,17 @@ func matchApp(pat, name, bundleID string) bool {
 	return pat == strings.ToLower(name) || pat == strings.ToLower(bundleID)
 }
 
+// RoomConfig は room 出力(ニコニコ風オーバーレイ共有)の設定。
+type RoomConfig struct {
+	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://ura-talk-room.<name>.workers.dev"。
+	// 空でもオーバーレイ自体は動く(ルーム未参加=自分の画面にだけ流れるソロモード)。
+	Server string `json:"server"`
+	// InputHotkey は文字入力バーを出すキー(音声トリガの hotkey とは別)。
+	InputHotkey Hotkey `json:"input_hotkey"`
+	// DisplayName は記名モードのルームで名乗る表示名(空なら記名ルームでも匿名)。
+	DisplayName string `json:"display_name"`
+}
+
 // EnhanceConfig はローカル LLM(Ollama)による文字起こし整形の設定。
 type EnhanceConfig struct {
 	Enabled  bool   `json:"enabled"`  // 整形を有効にするか
@@ -214,6 +228,7 @@ func Load() (*Config, error) {
 		Enhance:           EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
 		Emoji:             EmojiConfig{Mode: "off"},
 		Hotkey:            Hotkey{Mods: nil, Key: "rightcmd"},
+		Room:              RoomConfig{InputHotkey: Hotkey{Mods: nil, Key: "rightoption"}},
 		Sound:             SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
 		VAD: VADConfig{
 			Threshold:    0.01,

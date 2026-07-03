@@ -38,7 +38,7 @@ func TestParseRejectsBadURLs(t *testing.T) {
 	for _, raw := range []string{
 		"",
 		"not a url",
-		"https://example.com/r/short#k=x",                            // token 不正
+		"https://example.com/r/short#k=x", // token 不正
 		"https://example.com/r/abcdefghijKLMNOPQRST12",               // 鍵なし
 		"https://example.com/r/abcdefghijKLMNOPQRST12#k=dG9vc2hvcnQ", // 鍵が短い
 		"ftp://example.com/r/abcdefghijKLMNOPQRST12#k=x",
