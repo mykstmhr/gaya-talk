@@ -85,9 +85,19 @@ func Parse(raw string) (*Room, error) {
 
 // Payload は復号後のコメント 1 件。
 type Payload struct {
+	ID    string `json:"id,omitempty"` // 表示の重複排除用(送信側で採番)
 	Text  string `json:"text"`
 	Color string `json:"color"`          // "#rrggbb"
 	Name  string `json:"name,omitempty"` // 記名モード用(v1 では常に空)
+}
+
+// NewID は Payload.ID 用のランダム ID を返す。
+func NewID() string {
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
 }
 
 // envelope は WebSocket に流す暗号化メッセージ(サーバにはこれしか見えない)。

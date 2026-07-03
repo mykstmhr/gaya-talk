@@ -6,11 +6,14 @@ import (
 	"context"
 	"log"
 	"math/rand/v2"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mykstmhr/ura-talk/internal/config"
+	"github.com/mykstmhr/ura-talk/internal/dialog"
 	"github.com/mykstmhr/ura-talk/internal/inputbar"
 	"github.com/mykstmhr/ura-talk/internal/modkey"
 	"github.com/mykstmhr/ura-talk/internal/overlay"
@@ -48,7 +51,7 @@ func addRoomMenuItems() {
 	mRoomState.Hide()
 	mRoomCreate = systray.AddMenuItem("ルームを作成して URL をコピー", "中継サーバにルームを作り、共有 URL をクリップボードへ")
 	mRoomCreate.Hide()
-	mRoomJoin = systray.AddMenuItem("クリップボードの URL で参加", "コピー済みの共有 URL のルームに参加する")
+	mRoomJoin = systray.AddMenuItem("URL で参加…", "共有 URL を入力してルームに参加する(コピー済みなら自動で入る)")
 	mRoomJoin.Hide()
 	mRoomLeave = systray.AddMenuItem("ルームから退出", "ルームとの接続を切る")
 	mRoomLeave.Hide()
@@ -59,9 +62,7 @@ func setupRoom(cfg *config.Config) {
 	myColor = commentPalette[rand.IntN(len(commentPalette))]
 	overlay.Start()
 
-	roomClient.OnMessage = func(p room.Payload) {
-		overlay.Show(displayText(p), p.Color)
-	}
+	roomClient.OnMessage = displayComment
 	roomClient.OnState = func(s room.State) { setRoomState(s) }
 
 	// 文字入力バー: 専用ホットキーでトグルし、Enter で音声と同じ経路に流す。
@@ -95,7 +96,7 @@ func setupRoom(cfg *config.Config) {
 	}()
 	go func() {
 		for range mRoomJoin.ClickedCh {
-			joinRoomFromClipboard()
+			joinRoomWithDialog()
 		}
 	}()
 	go func() {
@@ -109,22 +110,50 @@ func setupRoom(cfg *config.Config) {
 // sendRoomComment はコメントをルームへ流す。表示は全員分をサーバのエコーで
 // 揃えるため自分では描画せず、未参加・切断中だけ自分の画面へ直接流す(ソロモード)。
 func sendRoomComment(cfg *config.Config, text string) error {
-	p := room.Payload{Text: text, Color: myColor}
+	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor}
 	if r := roomClient.Room(); r != nil && r.Named {
 		p.Name = cfg.Room.DisplayName // 空なら記名ルームでも匿名のまま
 	}
 	if err := roomClient.Send(p); err != nil {
-		overlay.Show(displayText(p), p.Color)
+		// 送信エラーでも実際には届いていることがある(タイムアウト等)。
+		// displayComment が ID で重複排除するので、あとからエコーが来ても二重にならない。
+		displayComment(p)
 	}
 	return nil
 }
 
-// displayText は記名モードのとき "[名前] 本文" の形にする。
-func displayText(p room.Payload) string {
-	if p.Name != "" {
-		return "[" + p.Name + "] " + p.Text
+// seenIDs は表示済みコメント ID(重複排除用)。ローカル表示とサーバエコーの二重や、
+// 万一の再配信を防ぐ。エントリは一定時間で掃除する。
+var (
+	seenMu  sync.Mutex
+	seenIDs = map[string]time.Time{}
+)
+
+// displayComment は重複を除いてコメントをオーバーレイに流す。
+func displayComment(p room.Payload) {
+	if p.ID != "" {
+		seenMu.Lock()
+		if _, dup := seenIDs[p.ID]; dup {
+			seenMu.Unlock()
+			if os.Getenv("URATALK_DEBUG") != "" {
+				log.Printf("重複コメントをスキップ: id=%s", p.ID)
+			}
+			return
+		}
+		now := time.Now()
+		seenIDs[p.ID] = now
+		for id, at := range seenIDs { // 小規模なので毎回全走査で十分
+			if now.Sub(at) > 5*time.Minute {
+				delete(seenIDs, id)
+			}
+		}
+		seenMu.Unlock()
 	}
-	return p.Text
+	text := p.Text
+	if p.Name != "" {
+		text = "[" + p.Name + "] " + text
+	}
+	overlay.Show(text, p.Color)
 }
 
 // createAndJoinRoom はルームを作成して共有 URL をコピーし、自分も参加する。
@@ -149,11 +178,20 @@ func createAndJoinRoom(cfg *config.Config) {
 	roomClient.Join(r)
 }
 
-// joinRoomFromClipboard はクリップボードの共有 URL のルームへ参加する。
-func joinRoomFromClipboard() {
-	raw, err := pbpaste()
-	if err != nil || raw == "" {
-		log.Println("⚠️ クリップボードが空です。共有 URL をコピーしてから選んでください。")
+// joinRoomWithDialog は共有 URL の入力ダイアログを出して参加する。
+// クリップボードに有効な共有 URL があればプリフィルするので、コピー済みなら
+// そのまま Enter するだけでよい。
+func joinRoomWithDialog() {
+	initial := ""
+	if raw, err := pbpaste(); err == nil {
+		if _, err := room.Parse(raw); err == nil {
+			initial = raw
+		}
+	}
+	raw, ok := dialog.Prompt("ルームに参加",
+		"共有された URL を貼り付けてください。",
+		"https://…/r/…#k=…", initial, "参加")
+	if !ok || strings.TrimSpace(raw) == "" {
 		return
 	}
 	r, err := room.Parse(raw)
@@ -164,17 +202,22 @@ func joinRoomFromClipboard() {
 	roomClient.Join(r)
 }
 
-// setRoomState は接続状態をメニューへ反映する。
+// setRoomState は接続状態をメニューへ反映する。参加中はルーム ID(トークンの先頭)も
+// 併記し、メンバー間で「同じルームにいるか」を突き合わせられるようにする。
 func setRoomState(s room.State) {
 	if mRoomState == nil {
 		return
 	}
+	id := ""
+	if r := roomClient.Room(); r != nil {
+		id = " (" + truncRunes(r.Token, 8) + ")"
+	}
 	switch s {
 	case room.StateConnected:
-		mRoomState.SetTitle("ルーム : 参加中")
+		mRoomState.SetTitle("ルーム : 参加中" + id)
 		mRoomLeave.Enable()
 	case room.StateConnecting:
-		mRoomState.SetTitle("ルーム : 接続中…")
+		mRoomState.SetTitle("ルーム : 接続中…" + id)
 		mRoomLeave.Enable()
 	default:
 		mRoomState.SetTitle("ルーム : 未参加(ソロモード)")
