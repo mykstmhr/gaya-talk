@@ -14,7 +14,7 @@ LDFLAGS := -ldflags=-extldflags=-Wl,-no_warn_duplicate_libraries
 
 APP := build/ura-talk.app
 
-# whisper モデルの取得先・置き場。config の whisper_model もここを指す。
+# whisper モデルの取得先・置き場。config の whisper.model もここを指す。
 MODEL_DIR := $(HOME)/.config/ura-talk/models
 MODEL := ggml-large-v3-turbo.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL)
@@ -28,17 +28,17 @@ CONFIG := $(HOME)/.config/ura-talk/config.json
 SIGN_IDENTITY ?= ura-talk-dev
 
 # 既定のセットアップ = 文字だけで参加する人向け(参加者が最も多いため)。
-# config を配置し voice_input を off にする。whisper モデルは取得しない
+# config を配置し voice.input を off にする。whisper モデルは取得しない
 # (マイク・whisper・Ollama すべて不要)。声も使うなら setup-voice。
-setup: ## 初回セットアップ(文字だけで参加。config 配置・voice_input off・モデル不要)
+setup: ## 初回セットアップ(文字だけで参加。config 配置・voice.input off・モデル不要)
 	@mkdir -p $(dir $(CONFIG))
 	@if [ -f "$(CONFIG)" ]; then \
 	  echo "既にあります(上書きしません): $(CONFIG)"; \
-	  echo "文字だけで使うなら voice_input を \"off\" にしてください。"; \
+	  echo "文字だけで使うなら voice.input を \"off\" にしてください。"; \
 	else \
 	  cp config.example.json "$(CONFIG)"; \
-	  sed -i '' 's/"voice_input": *"[^"]*"/"voice_input": "off"/' "$(CONFIG)"; \
-	  echo "配置しました(voice_input=off): $(CONFIG)"; \
+	  sed -i '' '/"voice": *{/,/}/ s/"input": *"[^"]*"/"input": "off"/' "$(CONFIG)"; \
+	  echo "配置しました(voice.input=off): $(CONFIG)"; \
 	fi
 	@echo "次: make app-open → アクセシビリティを許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る"
 
@@ -118,7 +118,7 @@ model: ## whisper モデルを直接指定して取得(make model MODEL=<file>)
 	  echo "保存: $(MODEL_DIR)/$(MODEL)"; \
 	fi
 
-# whisper モデルを候補から選んで取得し、config の whisper_model に反映する(setup-voice から呼ばれる)。
+# whisper モデルを候補から選んで取得し、config の whisper.model に反映する(setup-voice から呼ばれる)。
 whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	@mkdir -p $(MODEL_DIR)
 	@echo "whisper モデルを選んでください(数字を入力):"; \
@@ -139,10 +139,11 @@ whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	  echo "保存: $(MODEL_DIR)/$$m"; \
 	fi; \
 	if [ -f "$(CONFIG)" ]; then \
-	  sed -i '' "s|\"whisper_model\": *\"[^\"]*\"|\"whisper_model\": \"~/.config/ura-talk/models/$$m\"|" "$(CONFIG)"; \
-	  echo "✅ whisper_model を $$m に更新: $(CONFIG)"; \
+	  sed -i '' -e "/\"whisper\": *{/,/}/ s|\"model\": *\"[^\"]*\"|\"model\": \"~/.config/ura-talk/models/$$m\"|" \
+	            -e "s|\"whisper_model\": *\"[^\"]*\"|\"whisper_model\": \"~/.config/ura-talk/models/$$m\"|" "$(CONFIG)"; \
+	  echo "✅ whisper.model を $$m に更新: $(CONFIG)"; \
 	else \
-	  echo "⚠️ $(CONFIG) が無いので whisper_model は手動設定してください(値: ~/.config/ura-talk/models/$$m)"; \
+	  echo "⚠️ $(CONFIG) が無いので whisper.model は手動設定してください(値: ~/.config/ura-talk/models/$$m)"; \
 	fi
 
 # 整形用の LLM(Ollama)モデルを選んで pull し、config の enhance.model に反映する。
@@ -163,7 +164,7 @@ enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config
 	echo "→ $$m をダウンロードします"; \
 	ollama pull "$$m" || { echo "pull に失敗。Ollama が起動しているか確認してください(ollama serve / Ollama.app)"; exit 1; }; \
 	if [ -f "$(CONFIG)" ]; then \
-	  sed -i '' "s/\"model\": *\"[^\"]*\"/\"model\": \"$$m\"/" "$(CONFIG)"; \
+	  sed -i '' "/\"enhance\": *{/,/}/ s/\"model\": *\"[^\"]*\"/\"model\": \"$$m\"/" "$(CONFIG)"; \
 	  echo "✅ enhance.model を $$m に更新: $(CONFIG)"; \
 	else \
 	  echo "⚠️ $(CONFIG) が無いので enhance.model は手動設定してください(値: $$m)"; \

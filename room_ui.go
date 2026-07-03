@@ -118,8 +118,8 @@ func setupRoom(cfg *config.Config) {
 			}
 		}()
 	})
-	if down, err := watchDown(cfg.Room.InputHotkey); err != nil {
-		log.Printf("⚠️ 入力バーのホットキー(%s)を登録できません: %v", cfg.Room.InputHotkey, err)
+	if down, err := watchDown(cfg.InputHotkey); err != nil {
+		log.Printf("⚠️ 入力バーのホットキー(%s)を登録できません: %v", cfg.InputHotkey, err)
 	} else {
 		go func() {
 			for range down {

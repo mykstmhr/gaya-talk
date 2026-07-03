@@ -53,7 +53,9 @@ func TestStripJSONCParses(t *testing.T) {
     "server": "https://example.workers.dev", // ルーム中継先
     "display_name": "",  /* 匿名 */
   },
-  "language": "ja", // 文字起こし言語
+  "whisper": {
+    "language": "ja", // 文字起こし言語
+  },
 }`)
 	var cfg Config
 	if err := json.Unmarshal(stripJSONC(in), &cfg); err != nil {
@@ -62,7 +64,7 @@ func TestStripJSONCParses(t *testing.T) {
 	if cfg.Room.Server != "https://example.workers.dev" {
 		t.Errorf("room.server = %q", cfg.Room.Server)
 	}
-	if cfg.Language != "ja" {
-		t.Errorf("language = %q, want ja", cfg.Language)
+	if cfg.Whisper.Language != "ja" {
+		t.Errorf("whisper.language = %q, want ja", cfg.Whisper.Language)
 	}
 }

@@ -111,7 +111,7 @@ func runDevices() {
 	for _, n := range names {
 		fmt.Println("  - " + n)
 	}
-	fmt.Println("\nconfig.json の input_device に上記の名前(部分一致でOK)を設定してください。")
+	fmt.Println("\nconfig.json の voice.device に上記の名前(部分一致でOK)を設定してください。")
 	fmt.Println("例: Bluetooth イヤホンの再生音を切らさないために内蔵マイクを指定する。")
 }
 
@@ -122,7 +122,7 @@ func runKeys() {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	fmt.Println("ホットキーは config の \"hotkey\" / \"room.input_hotkey\" で変更できます:")
+	fmt.Println("ホットキーは config の \"voice.hotkey\" / \"input_hotkey\" で変更できます:")
 	fmt.Println(`  "hotkey": { "mods": ["ctrl","shift"], "key": "space" }`)
 	fmt.Println()
 	fmt.Println("修飾キー(mods): ctrl, shift, option(alt), cmd")
@@ -180,8 +180,8 @@ type output struct {
 
 // buildSink は送り先を決める。オーバーレイ(ルーム共有)固定。dryRun は送らず表示のみ。
 func buildSink(cfg *config.Config, dryRun bool) output {
-	if cfg.WhisperModel == "" {
-		log.Fatalf("設定エラー: whisper_model が未設定です(ggml モデルのパス)")
+	if cfg.Whisper.Model == "" {
+		log.Fatalf("設定エラー: whisper.model が未設定です(ggml モデルのパス)")
 	}
 	if dryRun {
 		return output{name: "ドライラン(送信しません)"} // send は nil
@@ -298,7 +298,7 @@ var tray = &trayStatus{baseIcon: iconIdle, baseText: "待機中…"}
 
 type trayStatus struct {
 	mu           sync.Mutex
-	cfg          *config.Config // バー表示の可否(voice_bar)。serve で設定する
+	cfg          *config.Config // バー表示の可否(voice.bar)。serve で設定する
 	baseIcon     iconState
 	baseText     string // ドロップダウンの状態テキスト
 	barText      string // バーの主ラベル(リッスン系の状態のときだけ非空)
@@ -372,7 +372,7 @@ func (t *trayStatus) apply() {
 	}
 
 	// 画面下部のバー。文字入力バーが開いている間は同じ場所を譲る(閉じたら復帰)。
-	if cfg == nil || !cfg.VoiceBar {
+	if cfg == nil || !cfg.Voice.Bar {
 		return
 	}
 	if inputOpen {
@@ -437,18 +437,18 @@ func serve(dryRun bool) {
 		setupRoom(cfg)
 	}
 
-	// voice_input が "off" なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く。
-	if cfg.VoiceInput == config.VoiceOff {
+	// voice.input が "off" なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く。
+	if cfg.Voice.Input == config.VoiceOff {
 		log.Println("ℹ️ 音声入力は無効です(文字入力バーのみ)。")
 		setInfo(mInfoMode, "方式 : 文字入力のみ")
-		setInfo(mInfoKey, "入力バー : "+cfg.Room.InputHotkey.String())
+		setInfo(mInfoKey, "入力バー : "+cfg.InputHotkey.String())
 		tray.setBase(iconIdle, "待機中(文字入力のみ)…", "")
 		return
 	}
 
 	// "auto" は出力デバイスで音声入力の可否を決める(スピーカー出力中は相手の声を
 	// 拾わないよう自動オフ)。"on" は常に許可。出力の抜き差しに追従する。
-	if cfg.VoiceInput == config.VoiceAuto {
+	if cfg.Voice.Input == config.VoiceAuto {
 		voice = voicegate.New(audioout.Private())
 		audioout.Watch(func() { applyVoiceAuto(cfg) })
 	} else {
@@ -504,31 +504,31 @@ func serve(dryRun bool) {
 		log.Printf("古い一時ファイルを %d 件削除しました", n)
 	}
 
-	rec, err := recorder.New(cfg.InputDevice)
+	rec, err := recorder.New(cfg.Voice.Device)
 	if err != nil {
 		log.Fatalf("録音初期化エラー: %v", err)
 	}
 	defer rec.Close()
 
 	wh := transcribe.Whisper{
-		Bin:           cfg.WhisperBin,
-		Model:         cfg.WhisperModel,
-		Lang:          cfg.Language,
-		BeamSize:      cfg.WhisperBeamSize,
-		Prompt:        cfg.WhisperPrompt,
-		NoSpeechThold: cfg.WhisperNoSpeechThold,
+		Bin:           cfg.Whisper.Bin,
+		Model:         cfg.Whisper.Model,
+		Lang:          cfg.Whisper.Language,
+		BeamSize:      cfg.Whisper.BeamSize,
+		Prompt:        cfg.Whisper.Prompt,
+		NoSpeechThold: cfg.Whisper.NoSpeechThold,
 	}
 
-	down, up, stopTrigger, err := buildTrigger(cfg.Hotkey)
+	down, up, stopTrigger, err := buildTrigger(cfg.Voice.Hotkey)
 	if err != nil {
 		log.Fatalf("ホットキー設定エラー: %v", err)
 	}
 	defer stopTrigger()
 
 	// 状態の下に動作情報を常時表示(方式/キー)。全角キーで幅を揃える。
-	setInfo(mInfoKey, "キー : "+cfg.Hotkey.String())
+	setInfo(mInfoKey, "キー : "+cfg.Voice.Hotkey.String())
 	updateModeInfo(cfg)
-	if cfg.VoiceInput == config.VoiceAuto {
+	if cfg.Voice.Input == config.VoiceAuto {
 		if voice.Allowed() {
 			log.Println("🎧 イヤホン出力を検出 → 音声入力は有効です(スピーカーに切り替えると自動オフ)。")
 		} else {
@@ -536,14 +536,14 @@ func serve(dryRun bool) {
 		}
 	}
 
-	if cfg.ListenMode == "vad" {
-		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Hotkey)
+	if cfg.Voice.ListenMode == "vad" {
+		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Voice.Hotkey)
 		tray.setBase(iconIdle, "待機中…", "")
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
-	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Hotkey)
+	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Voice.Hotkey)
 	tray.setBase(iconIdle, "待機中…", "")
 	pttLoop(rec, wh, out, cfg, down, up)
 }
@@ -571,11 +571,11 @@ func applyVoiceAuto(cfg *config.Config) {
 
 // updateModeInfo は動作情報行(方式)を現在の状態に合わせて更新する。
 func updateModeInfo(cfg *config.Config) {
-	if cfg.VoiceInput == config.VoiceAuto && !voice.Allowed() {
+	if cfg.Voice.Input == config.VoiceAuto && !voice.Allowed() {
 		setInfo(mInfoMode, "方式 : 音声オフ(スピーカー出力中)")
 		return
 	}
-	if cfg.ListenMode == "vad" {
+	if cfg.Voice.ListenMode == "vad" {
 		setInfo(mInfoMode, "方式 : VAD(自動区切り)")
 	} else {
 		setInfo(mInfoMode, "方式 : PTT(押している間だけ)")
@@ -646,14 +646,14 @@ func buildTrigger(h config.Hotkey) (down, up <-chan struct{}, stop func(), err e
 
 // playOn / playOff は有効化/無効化の効果音を鳴らす(設定で無効なら何もしない)。
 func playOn(cfg *config.Config) {
-	if cfg.Sound.Enabled {
-		playSound(cfg.Sound.On)
+	if cfg.Voice.Sound.Enabled {
+		playSound(cfg.Voice.Sound.On)
 	}
 }
 
 func playOff(cfg *config.Config) {
-	if cfg.Sound.Enabled {
-		playSound(cfg.Sound.Off)
+	if cfg.Voice.Sound.Enabled {
+		playSound(cfg.Voice.Sound.Off)
 	}
 }
 
@@ -677,7 +677,7 @@ func playSound(name string) {
 
 // flashVoiceBar は「押したのに始まらなかった」場面の通知をバーで一瞬出す。
 func flashVoiceBar(cfg *config.Config, label string) {
-	if cfg.VoiceBar {
+	if cfg.Voice.Bar {
 		voicebar.Flash(label)
 	}
 }
@@ -688,7 +688,7 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		<-down
 		inputbar.Dismiss() // 文字入力バーが開いていたら閉じる(排他。フラッシュとも重ねない)
 		if !voice.Allowed() {
-			log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
+			log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice.input を \"on\" に)。")
 			flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
 			continue
 		}
@@ -710,8 +710,8 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		}
 		log.Printf("録音完了 (%d ms)", durMs)
 
-		if durMs < cfg.MinDurationMs {
-			log.Printf("短すぎるのでスキップ (<%d ms)", cfg.MinDurationMs)
+		if durMs < cfg.Voice.MinDurationMs {
+			log.Printf("短すぎるのでスキップ (<%d ms)", cfg.Voice.MinDurationMs)
 			continue
 		}
 		// 文字起こし〜出力は数秒かかるので、次の発話を妨げないよう別 goroutine で処理する。
@@ -724,11 +724,11 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	debug := os.Getenv("URATALK_DEBUG") != ""
 	seg := vad.New(vad.Config{
 		SampleRate:   recorder.SampleRate,
-		Threshold:    cfg.VAD.Threshold,
-		MinSpeechMs:  cfg.VAD.MinSpeechMs,
-		SilenceMs:    cfg.VAD.SilenceMs,
-		MaxSegmentMs: cfg.VAD.MaxSegmentMs,
-		PrerollMs:    cfg.VAD.PrerollMs,
+		Threshold:    cfg.Voice.VAD.Threshold,
+		MinSpeechMs:  cfg.Voice.VAD.MinSpeechMs,
+		SilenceMs:    cfg.Voice.VAD.SilenceMs,
+		MaxSegmentMs: cfg.Voice.VAD.MaxSegmentMs,
+		PrerollMs:    cfg.Voice.VAD.PrerollMs,
 		Debug:        debug,
 	}, func(pcm []byte, durMs int) {
 		// オーディオスレッドから呼ばれるので、出力は別 goroutine に逃がす。
@@ -747,7 +747,7 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 
 	// リッスン中は音量を画面上のバーの波形へ流す(オーディオスレッドから呼ばれる)。
 	feed := seg.Feed
-	if cfg.VoiceBar {
+	if cfg.Voice.Bar {
 		feed = func(pcm []byte) {
 			voicebar.Level(vad.RMS(pcm))
 			seg.Feed(pcm)
@@ -768,7 +768,7 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			<-down
 			inputbar.Dismiss() // 文字入力バーが開いていたら閉じる(排他。フラッシュとも重ねない)
 			if !voice.Allowed() {
-				log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
+				log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice.input を \"on\" に)。")
 				flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
 				continue
 			}
@@ -825,8 +825,8 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 	defer tray.endTranscribe()
 
 	// 小声・ボソボソ対策: Whisper に渡す前に音量を持ち上げる。
-	if cfg.Gain.Enabled {
-		pcm = recorder.NormalizePCM(pcm, cfg.Gain.TargetPeak, cfg.Gain.MaxGain)
+	if cfg.Voice.Gain.Enabled {
+		pcm = recorder.NormalizePCM(pcm, cfg.Voice.Gain.TargetPeak, cfg.Voice.Gain.MaxGain)
 	}
 	text, err := wh.Transcribe(recorder.WAVFromPCM(pcm))
 	if err != nil {

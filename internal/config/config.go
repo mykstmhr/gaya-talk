@@ -1,5 +1,9 @@
 // Package config はアプリ設定の読み込みを担う。
 // モデルパスなどは環境変数でも上書きできる。
+//
+// スキーマは「オーバーレイ共有(room)+文字入力バーが主、音声入力(voice)がサブ」
+// という主従を反映してネストしている。かつて音声設定がトップレベルにフラットに
+// 並んでいた頃の旧キー(voice_input / whisper_model など)も読める(migrateLegacy)。
 package config
 
 import (
@@ -15,49 +19,64 @@ import (
 type Config struct {
 	// room(オーバーレイ共有)の設定。
 	Room RoomConfig `json:"room"`
+	// InputHotkey は文字入力バーを出すキー(主入力)。ルーム未参加のソロモードでも
+	// 使うためトップレベルに置く。音声トリガの voice.hotkey とは別のキーにすること。
+	InputHotkey Hotkey `json:"input_hotkey"`
+	// Voice は音声入力(マイク→文字起こし)の設定一式。使わない人は voice.input:"off"
+	// だけで残りは無視される。
+	Voice VoiceConfig `json:"voice"`
+	// Whisper は文字起こし(whisper.cpp)の設定。voice.input:"off" なら不要。
+	Whisper WhisperConfig `json:"whisper"`
+	// Enhance は文字起こし結果のローカル LLM(Ollama)整形。日本語の読みやすさ向上用。
+	Enhance EnhanceConfig `json:"enhance"`
+	Emoji   EmojiConfig   `json:"emoji"`
+}
 
-	// VoiceInput は音声入力(マイク→文字起こし)の使用可否。
+// VoiceConfig は音声入力(マイク→文字起こし)の設定。
+type VoiceConfig struct {
+	// Input は音声入力の使用可否。
 	// "auto"(既定): 出力がスピーカー等のときは自動でオフ、イヤホン等のときはオン。
 	// "on": 常に有効 / "off": 常に無効(文字入力バーのみ・マイク/whisper 不要)。
 	// 旧来の true/false もそれぞれ on/off として受け付ける。
-	VoiceInput VoiceMode `json:"voice_input"`
-
-	// whisper-cli の実行パス(PATH 上にあれば "whisper-cli" のままで良い)。
-	WhisperBin string `json:"whisper_bin"`
-	// ggml モデルファイルのパス。
-	WhisperModel string `json:"whisper_model"`
-	// 録音に使う入力デバイス名(部分一致)。空ならシステム既定。
-	// Bluetooth イヤホン以外(内蔵マイク等)を指定すると、イヤホンが通話モードに
-	// 切り替わって再生音が途切れるのを防げる。`ura-talk devices` で候補を確認できる。
-	InputDevice string `json:"input_device"`
-	// 文字起こし言語。日本語なら "ja"、自動判定なら "auto"。
-	Language string `json:"language"`
-	// 録音音声の自動ゲイン(正規化)。小声・ボソボソの認識改善用。
-	Gain GainConfig `json:"gain"`
-	// whisper の初期プロンプト(口語・語彙のヒント。誤認識低減用)。
-	WhisperPrompt string `json:"whisper_prompt"`
-	// whisper のビーム幅(0 で既定 5)。上げると精度↑・速度↓。
-	WhisperBeamSize int `json:"whisper_beam_size"`
-	// whisper の no-speech 閾値(0 で既定 0.6)。下げると小声を拾いやすいが幻聴増。
-	WhisperNoSpeechThold float64 `json:"whisper_no_speech_thold"`
-	// 文字起こし結果のローカル LLM(Ollama)整形。日本語の読みやすさ向上用。
-	Enhance EnhanceConfig `json:"enhance"`
-	Emoji   EmojiConfig   `json:"emoji"`
-	// 入力方式。"ptt"(押している間だけ録音)または "vad"(キーでリッスンを
-	// トグルし、無音で自動区切りして発話ごとに投稿)。
-	ListenMode string `json:"listen_mode"`
-	// VAD 区切りのパラメータ(listen_mode が "vad" のとき有効)。
-	VAD VADConfig `json:"vad"`
-	// ホットキー。ptt では押下中に録音、vad ではリッスンの開始/停止トグル。
+	Input VoiceMode `json:"input"`
+	// Hotkey は音声トリガ。ptt では押下中に録音、vad ではリッスンの開始/停止トグル。
 	// 単体修飾キー(rightcmd 等)も指定可(mods は空にする)。
 	Hotkey Hotkey `json:"hotkey"`
-	// 有効化/無効化時に鳴らす効果音。
-	Sound SoundConfig `json:"sound"`
-	// リッスン/録音中に画面下部へ小さな状態バー(音量メーター付き)を出すか。
-	// バーは画面共有には映らず、クリックは下のアプリへ素通しする。
-	VoiceBar bool `json:"voice_bar"`
-	// この長さ未満の録音は無視する(ptt の誤爆防止)。
+	// ListenMode は入力方式。"vad"(キーでリッスンをトグルし、無音で自動区切りして
+	// 発話ごとに投稿)または "ptt"(押している間だけ録音)。
+	ListenMode string `json:"listen_mode"`
+	// Device は録音に使う入力デバイス名(部分一致)。空ならシステム既定。
+	// Bluetooth イヤホン以外(内蔵マイク等)を指定すると、イヤホンが通話モードに
+	// 切り替わって再生音が途切れるのを防げる。`ura-talk devices` で候補を確認できる。
+	Device string `json:"device"`
+	// VAD は無音区切りのパラメータ(listen_mode が "vad" のとき有効)。
+	VAD VADConfig `json:"vad"`
+	// Gain は録音音声の自動ゲイン(正規化)。小声・ボソボソの認識改善用。
+	Gain GainConfig `json:"gain"`
+	// MinDurationMs 未満の録音は無視する(ptt の誤爆防止)。
 	MinDurationMs int `json:"min_duration_ms"`
+	// Sound は有効化/無効化時に鳴らす効果音。
+	Sound SoundConfig `json:"sound"`
+	// Bar はリッスン/録音中に画面下部へ小さな状態バー(音量メーター付き)を出すか。
+	// バーは画面共有には映らず、クリックは下のアプリへ素通しする。
+	Bar bool `json:"bar"`
+}
+
+// WhisperConfig は文字起こし(whisper.cpp)の設定。
+type WhisperConfig struct {
+	// Bin は whisper-cli の実行パス(PATH 上にあれば "whisper-cli" のままで良い)。
+	Bin string `json:"bin"`
+	// Model は ggml モデルファイルのパス。
+	Model string `json:"model"`
+	// Language は文字起こし言語。日本語なら "ja"、自動判定なら "auto"。
+	Language string `json:"language"`
+	// Prompt は whisper の初期プロンプト(口語・語彙のヒント。誤認識低減用)。
+	Prompt string `json:"prompt"`
+	// BeamSize は whisper のビーム幅(0 で既定 5)。上げると精度↑・速度↓。
+	BeamSize int `json:"beam_size"`
+	// NoSpeechThold は whisper の no-speech 閾値(0 で既定 0.6)。
+	// 下げると小声を拾いやすいが幻聴増。
+	NoSpeechThold float64 `json:"no_speech_thold"`
 }
 
 // VoiceMode は音声入力の使用可否("auto" / "on" / "off")。
@@ -89,7 +108,7 @@ func (m *VoiceMode) UnmarshalJSON(b []byte) error {
 	case "":
 		*m = VoiceAuto
 	default:
-		return fmt.Errorf("voice_input は auto/on/off のいずれかです(現在: %q)", s)
+		return fmt.Errorf("voice.input は auto/on/off のいずれかです(現在: %q)", s)
 	}
 	return nil
 }
@@ -99,8 +118,6 @@ type RoomConfig struct {
 	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://ura-talk-room.<name>.workers.dev"。
 	// 空でもオーバーレイ自体は動く(ルーム未参加=自分の画面にだけ流れるソロモード)。
 	Server string `json:"server"`
-	// InputHotkey は文字入力バーを出すキー(音声トリガの hotkey とは別)。
-	InputHotkey Hotkey `json:"input_hotkey"`
 	// DisplayName は記名モードのルームで名乗る表示名(空なら記名ルームでも匿名)。
 	DisplayName string `json:"display_name"`
 	// SlackBotToken は Slack ミラー(コメントをチャンネルへ転送)に使う bot token(xoxb)。
@@ -117,7 +134,7 @@ type EnhanceConfig struct {
 	Enabled  bool   `json:"enabled"`  // 整形を有効にするか
 	Backend  string `json:"backend"`  // 現状 "ollama"
 	Endpoint string `json:"endpoint"` // Ollama エンドポイント
-	Model    string `json:"model"`    // 使うモデル名(例 qwen2.5:7b)
+	Model    string `json:"model"`    // 使うモデル名(例 qwen2.5:3b)
 	Prompt   string `json:"prompt"`   // 整形プロンプト(空で既定)
 	// AllowRemote は endpoint に非ローカル(localhost 以外)のホストを許すか。
 	// 既定 false では発話本文が外部へ出るのを防ぐため非ローカル endpoint を拒否する。
@@ -170,26 +187,27 @@ func (h Hotkey) String() string {
 // ~/.config/ura-talk/config.json。見つからない項目はデフォルトを使う。
 func Load() (*Config, error) {
 	cfg := &Config{
-		VoiceInput:      VoiceAuto,
-		WhisperBin:      "whisper-cli",
-		Language:        "ja",
-		MinDurationMs:   300,
-		ListenMode:      "ptt",
-		WhisperBeamSize: 5,
-		Gain:            GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
-		Enhance:         EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:7b"},
-		Emoji:           EmojiConfig{Mode: "off"},
-		Hotkey:          Hotkey{Mods: nil, Key: "rightcmd"},
-		Room:            RoomConfig{InputHotkey: Hotkey{Mods: []string{"rightshift"}, Key: "rightcmd"}},
-		Sound:           SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
-		VoiceBar:        true,
-		VAD: VADConfig{
-			Threshold:    0.01,
-			MinSpeechMs:  300,
-			SilenceMs:    700,
-			MaxSegmentMs: 15000,
-			PrerollMs:    300,
+		Room:        RoomConfig{},
+		InputHotkey: Hotkey{Key: "rightcmd"},
+		Voice: VoiceConfig{
+			Input:         VoiceAuto,
+			Hotkey:        Hotkey{Mods: []string{"rightshift"}, Key: "rightcmd"},
+			ListenMode:    "vad",
+			MinDurationMs: 300,
+			Gain:          GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
+			Sound:         SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
+			Bar:           true,
+			VAD: VADConfig{
+				Threshold:    0.01,
+				MinSpeechMs:  300,
+				SilenceMs:    700,
+				MaxSegmentMs: 15000,
+				PrerollMs:    300,
+			},
 		},
+		Whisper: WhisperConfig{Bin: "whisper-cli", Language: "ja", BeamSize: 5},
+		Enhance: EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:3b"},
+		Emoji:   EmojiConfig{Mode: "off"},
 	}
 
 	path := os.Getenv("URATALK_CONFIG")
@@ -203,20 +221,91 @@ func Load() (*Config, error) {
 	if path != "" {
 		if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
 			// JSONC(コメント・末尾カンマ)を許可するため、素の JSON へ落としてから読む。
-			if err := json.Unmarshal(stripJSONC(data), cfg); err != nil {
+			plain, err := migrateLegacy(stripJSONC(data))
+			if err != nil {
+				return nil, fmt.Errorf("設定ファイル %s のパースに失敗: %w", path, err)
+			}
+			if err := json.Unmarshal(plain, cfg); err != nil {
 				return nil, fmt.Errorf("設定ファイル %s のパースに失敗: %w", path, err)
 			}
 		}
 	}
 
 	if v := os.Getenv("URATALK_WHISPER_MODEL"); v != "" {
-		cfg.WhisperModel = v
+		cfg.Whisper.Model = v
 	}
 	if v := os.Getenv("URATALK_SLACK_BOT_TOKEN"); v != "" {
 		cfg.Room.SlackBotToken = v
 	}
-	cfg.WhisperModel = expandHome(cfg.WhisperModel)
+	cfg.Whisper.Model = expandHome(cfg.Whisper.Model)
 	return cfg, nil
+}
+
+// legacyMoves は旧スキーマ(音声設定がトップレベルにフラットに並んでいた頃)の
+// キーと、新しい置き場所の対応。
+var legacyMoves = []struct {
+	old string
+	to  []string
+}{
+	{"voice_input", []string{"voice", "input"}},
+	{"hotkey", []string{"voice", "hotkey"}},
+	{"listen_mode", []string{"voice", "listen_mode"}},
+	{"input_device", []string{"voice", "device"}},
+	{"vad", []string{"voice", "vad"}},
+	{"gain", []string{"voice", "gain"}},
+	{"min_duration_ms", []string{"voice", "min_duration_ms"}},
+	{"sound", []string{"voice", "sound"}},
+	{"voice_bar", []string{"voice", "bar"}},
+	{"whisper_bin", []string{"whisper", "bin"}},
+	{"whisper_model", []string{"whisper", "model"}},
+	{"language", []string{"whisper", "language"}},
+	{"whisper_prompt", []string{"whisper", "prompt"}},
+	{"whisper_beam_size", []string{"whisper", "beam_size"}},
+	{"whisper_no_speech_thold", []string{"whisper", "no_speech_thold"}},
+}
+
+// migrateLegacy は旧スキーマのキーを新しい置き場所へ写した JSON を返す。
+// 新キーが既に書かれていればそちらを優先し、旧キーは捨てる(新旧混在の config でも
+// 挙動が予想しやすいように)。room.input_hotkey → input_hotkey も同様に写す。
+func migrateLegacy(plain []byte) ([]byte, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(plain, &raw); err != nil {
+		return nil, err
+	}
+	for _, m := range legacyMoves {
+		v, ok := raw[m.old]
+		if !ok {
+			continue
+		}
+		delete(raw, m.old)
+		setIfAbsent(raw, m.to, v)
+	}
+	if room, ok := raw["room"].(map[string]any); ok {
+		if v, ok := room["input_hotkey"]; ok {
+			delete(room, "input_hotkey")
+			setIfAbsent(raw, []string{"input_hotkey"}, v)
+		}
+	}
+	return json.Marshal(raw)
+}
+
+// setIfAbsent は path の位置にまだ値が無ければ v を置く(途中の階層は作る)。
+func setIfAbsent(raw map[string]any, path []string, v any) {
+	m := raw
+	for _, k := range path[:len(path)-1] {
+		child, ok := m[k].(map[string]any)
+		if !ok {
+			if _, exists := m[k]; exists {
+				return // 予期しない型が既に居るなら触らない
+			}
+			child = map[string]any{}
+			m[k] = child
+		}
+		m = child
+	}
+	if _, exists := m[path[len(path)-1]]; !exists {
+		m[path[len(path)-1]] = v
+	}
 }
 
 // expandHome は先頭の "~" をホームディレクトリに展開する。
