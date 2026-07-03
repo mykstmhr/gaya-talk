@@ -1,0 +1,30 @@
+// Renovate の設定。対象は gomod / npm(server/)/ GitHub Actions の 3 エコシステム。
+// PR ノイズを抑えるため週次にまとめ、actions は SHA pin(digest)を維持したまま更新する。
+// 脆弱性起因の更新(vulnerabilityAlerts)はスケジュールを無視して即 PR が来る。
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    // actions の参照を SHA pin に保つ(バージョンコメントも更新される)
+    "helpers:pinGitHubActionDigests",
+    ":timezone(Asia/Tokyo)",
+    // 週明けにまとめて来る(月曜早朝)
+    "schedule:weekly",
+  ],
+  "labels": ["dependencies"],
+  // go.mod 更新時に go mod tidy まで行う
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    // minor / patch は 1 本の PR にまとめる(major は個別 PR のまま)
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "minor / patch 更新",
+    },
+    // actions の SHA 更新(digest / pin)と patch は CI が通れば自動マージ。
+    // minor と同じ PR にまとまった場合は全体が automerge 対象外になる(手動マージ)。
+    {
+      "matchUpdateTypes": ["patch", "digest", "pin"],
+      "automerge": true,
+    },
+  ],
+}
