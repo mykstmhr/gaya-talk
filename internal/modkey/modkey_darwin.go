@@ -70,23 +70,24 @@ var (
 	watchers []*watcher
 )
 
+// 修飾キーの押下/解放(flagsChanged)ごとに呼ばれる。送信は非ブロッキングなので
+// watchMu を保持したまま処理してよい(スナップショットの確保は不要)。
+//
 //export modkeyGoCallback
 func modkeyGoCallback(keycode C.int, flags C.ulonglong) {
 	kc, f := int(keycode), uint64(flags)
 	watchMu.Lock()
-	ws := make([]*watcher, len(watchers))
-	copy(ws, watchers)
-	watchMu.Unlock()
+	defer watchMu.Unlock()
 
 	// 同じキーのコード監視が成立しているか(成立時は単体監視へ届けない)。
 	chordActive := false
-	for _, w := range ws {
+	for _, w := range watchers {
 		if w.code == kc && w.held != 0 && f&w.held != 0 {
 			chordActive = true
 			break
 		}
 	}
-	for _, w := range ws {
+	for _, w := range watchers {
 		if w.code != kc {
 			continue
 		}

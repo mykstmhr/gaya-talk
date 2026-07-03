@@ -16,13 +16,11 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/config"
 	"github.com/mykstmhr/ura-talk/internal/dialog"
 	"github.com/mykstmhr/ura-talk/internal/inputbar"
-	"github.com/mykstmhr/ura-talk/internal/modkey"
 	"github.com/mykstmhr/ura-talk/internal/overlay"
 	"github.com/mykstmhr/ura-talk/internal/room"
 	"github.com/mykstmhr/ura-talk/internal/slack"
 
 	"fyne.io/systray"
-	"golang.design/x/hotkey"
 )
 
 // roomClient は参加中ルームへの接続(未参加でも安全に使える)。
@@ -96,7 +94,7 @@ func setupRoom(cfg *config.Config) {
 	// 文字入力バー: 専用ホットキーでトグルし、Enter で音声と同じ経路に流す。
 	inputbar.SetOnSubmit(func(text string) {
 		go func() {
-			if err := sendRoomComment(cfg, text); err != nil {
+			if err := sendRoomComment(text); err != nil {
 				log.Printf("コメント送信失敗: %v", err)
 			}
 		}()
@@ -225,7 +223,7 @@ func copyCurrentRoomURL() {
 
 // sendRoomComment はコメントをルームへ流す。表示は全員分をサーバのエコーで
 // 揃えるため自分では描画せず、未参加・切断中だけ自分の画面へ直接流す(ソロモード)。
-func sendRoomComment(cfg *config.Config, text string) error {
+func sendRoomComment(text string) error {
 	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor}
 	if r := roomClient.Room(); r != nil && r.Named {
 		p.Name = currentDisplayName() // 作成/参加時に確定済み
@@ -582,52 +580,12 @@ func toggle(item *systray.MenuItem, on bool) {
 	}
 }
 
-// watchDown はホットキーの押下だけを流すチャネルを返す(入力バー用)。
-// buildTrigger と同じく、単体修飾キーは CGEventTap、組み合わせは hotkey ライブラリを使う。
-// 修飾キー 2 つのコード(例 mods:["rightshift"], key:"rightcmd")にも対応する。
+// watchDown はホットキー h の押下だけを流すチャネルを返す(入力バー用)。
+// 分岐(単体修飾キー / コード / hotkey ライブラリ)は buildTrigger に一本化してあり、
+// ここでは解放(up)と停止(stop)を捨てて押下だけを使う(常駐終了まで有効なので stop 不要)。
 func watchDown(h config.Hotkey) (<-chan struct{}, error) {
-	d := make(chan struct{}, 8)
-	keyName := strings.ToLower(h.Key)
-	if modkey.Is(keyName) && (len(h.Mods) == 0 || (len(h.Mods) == 1 && modkey.Is(strings.ToLower(h.Mods[0])))) {
-		var events <-chan bool
-		var err error
-		if len(h.Mods) == 1 {
-			events, err = modkey.WatchChord(keyName, strings.ToLower(h.Mods[0]))
-		} else {
-			events, err = modkey.Watch(keyName)
-		}
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			for pressed := range events {
-				if pressed {
-					select {
-					case d <- struct{}{}:
-					default:
-					}
-				}
-			}
-		}()
-		return d, nil
-	}
-	mods, key, err := parseHotkey(h)
-	if err != nil {
-		return nil, err
-	}
-	hk := hotkey.New(mods, key)
-	if err := hk.Register(); err != nil {
-		return nil, err
-	}
-	go func() {
-		for range hk.Keydown() {
-			select {
-			case d <- struct{}{}:
-			default:
-			}
-		}
-	}()
-	return d, nil
+	down, _, _, err := buildTrigger(h)
+	return down, err
 }
 
 // pbcopy / pbpaste は URL(ASCII)のやり取りに使う。日本語を通さないので

@@ -190,7 +190,7 @@ func buildSink(cfg *config.Config, dryRun bool) output {
 	}
 	return output{
 		name: "オーバーレイ",
-		send: func(text string) error { return sendRoomComment(cfg, text) },
+		send: func(text string) error { return sendRoomComment(text) },
 	}
 }
 
@@ -517,7 +517,7 @@ func serve(dryRun bool) {
 		NoSpeechThold: cfg.WhisperNoSpeechThold,
 	}
 
-	down, up, stopTrigger, err := buildTrigger(cfg)
+	down, up, stopTrigger, err := buildTrigger(cfg.Hotkey)
 	if err != nil {
 		log.Fatalf("ホットキー設定エラー: %v", err)
 	}
@@ -585,13 +585,13 @@ func updateModeInfo(cfg *config.Config) {
 	}
 }
 
-// buildTrigger はホットキーを設定から組み立て、押下(down)/解放(up)を流すチャネルを返す。
+// buildTrigger はホットキー h を組み立て、押下(down)/解放(up)を流すチャネルを返す。
 // 単体修飾キー(rightcmd 等)や修飾キー 2 つのコードなら CGEventTap、それ以外は
-// golang.design/x/hotkey を使う。
-func buildTrigger(cfg *config.Config) (down, up <-chan struct{}, stop func(), err error) {
+// golang.design/x/hotkey を使う。押下だけ欲しい入力バーは watchDown から呼ぶ。
+func buildTrigger(h config.Hotkey) (down, up <-chan struct{}, stop func(), err error) {
 	d := make(chan struct{}, 8)
 	u := make(chan struct{}, 8)
-	keyName := strings.ToLower(cfg.Hotkey.Key)
+	keyName := strings.ToLower(h.Key)
 
 	// send は詰まっていたら捨てる(消費されないチャネルで relay が止まらないように)。
 	// 例: VAD では up(離す)を誰も読まないので、ブロッキング送信だと relay が固まる。
@@ -603,12 +603,11 @@ func buildTrigger(cfg *config.Config) (down, up <-chan struct{}, stop func(), er
 	}
 
 	// 単体修飾キー、または修飾キー 2 つのコード(例 mods:["rightshift"], key:"rightcmd")。
-	if modkey.Is(keyName) && (len(cfg.Hotkey.Mods) == 0 ||
-		(len(cfg.Hotkey.Mods) == 1 && modkey.Is(strings.ToLower(cfg.Hotkey.Mods[0])))) {
+	if modkey.Is(keyName) && (len(h.Mods) == 0 ||
+		(len(h.Mods) == 1 && modkey.Is(strings.ToLower(h.Mods[0])))) {
 		var events <-chan bool
-		var err error
-		if len(cfg.Hotkey.Mods) == 1 {
-			events, err = modkey.WatchChord(keyName, strings.ToLower(cfg.Hotkey.Mods[0]))
+		if len(h.Mods) == 1 {
+			events, err = modkey.WatchChord(keyName, strings.ToLower(h.Mods[0]))
 		} else {
 			events, err = modkey.Watch(keyName)
 		}
@@ -627,7 +626,7 @@ func buildTrigger(cfg *config.Config) (down, up <-chan struct{}, stop func(), er
 		return d, u, func() {}, nil
 	}
 
-	mods, key, err := parseHotkey(cfg.Hotkey)
+	mods, key, err := parseHotkey(h)
 	if err != nil {
 		return nil, nil, nil, err
 	}
