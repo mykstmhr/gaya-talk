@@ -22,13 +22,15 @@
 
 会議音声をスピーカーで流している人や、音声入力が要らない人はこれで十分です。**whisper.cpp もモデルもマイクも Ollama も不要**です。
 
+**いちばん簡単なのは配布された `.app` を使うこと**。ホストから zip を受け取るか [Releases](https://github.com/mykstmhr/ura-talk/releases) からダウンロードして、解凍・起動するだけです(ビルド不要。初回だけ Gatekeeper のため右クリック →「開く」)。設定ファイルは初回起動時に `~/.config/ura-talk/config.json` へ自動生成されます。
+
+自分でビルドする場合:
+
 ```sh
 brew install go            # ビルドに必要(未導入なら)
 make setup                 # config を配置し voice.input を off に(モデルは取得しない)
 make app-open              # .app をビルドして起動
 ```
-
-または、ホストから **`ura-talk.app` の zip を受け取った場合**は、ビルド不要で解凍して起動できます(初回だけ Gatekeeper のため右クリック →「開く」。詳細は[配布用ビルド](docs/development.md#配布用ビルド))。
 
 起動したら:
 
@@ -76,7 +78,7 @@ make app-open
 
 ## ショートカットキーの変更
 
-`voice.hotkey`(音声リッスン)と `input_hotkey`(文字入力バー)で変更(使えるキー名は `./bin/ura-talk keys`)。変更後は `make restart`。
+メニューバーの「**設定ファイルを開く…**」で config を開き、`voice.hotkey`(音声リッスン)と `input_hotkey`(文字入力バー)を変更(使えるキー名は `./bin/ura-talk keys`)。メニューの「**再起動**」で反映される。
 
 - **単体修飾キー**(`mods` 空): `rightcmd` / `leftcmd` / `rightoption` / `leftoption` / `rightshift` / `leftshift` / `fn`
 - **修飾キー2つのコード**: `mods` に押しっぱなしにする側を1つ(例 `{"mods":["rightshift"],"key":"rightcmd"}` = 右⇧+右⌘)。JIS 配列に右⌥ が無い場合に便利

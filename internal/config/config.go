@@ -213,14 +213,7 @@ func Load() (*Config, error) {
 		Emoji:   EmojiConfig{Mode: "off"},
 	}
 
-	path := os.Getenv("URATALK_CONFIG")
-	if path == "" {
-		if _, err := os.Stat("config.json"); err == nil {
-			path = "config.json"
-		} else if home, err := os.UserHomeDir(); err == nil {
-			path = filepath.Join(home, ".config", "ura-talk", "config.json")
-		}
-	}
+	path := Path()
 	if path != "" {
 		if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
 			// JSONC(コメント・末尾カンマ)を許可するため、素の JSON へ落としてから読む。
@@ -245,6 +238,21 @@ func Load() (*Config, error) {
 	}
 	cfg.Whisper.Model = expandHome(cfg.Whisper.Model)
 	return cfg, nil
+}
+
+// Path は Load が読む設定ファイルのパスを返す(まだ存在しなくてもパスは返す)。
+// 検索順: 環境変数 URATALK_CONFIG → ./config.json → ~/.config/ura-talk/config.json。
+func Path() string {
+	if p := os.Getenv("URATALK_CONFIG"); p != "" {
+		return p
+	}
+	if _, err := os.Stat("config.json"); err == nil {
+		return "config.json"
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return filepath.Join(home, ".config", "ura-talk", "config.json")
+	}
+	return ""
 }
 
 // legacyMoves は旧スキーマ(音声設定がトップレベルにフラットに並んでいた頃)の

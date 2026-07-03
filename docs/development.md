@@ -24,7 +24,7 @@ Go 1.26.4+ が必要。Finder/`.app` 起動では作業ディレクトリが `/`
 - Finder でアプリを**右クリック →「開く」**(以後は普通に起動できる)
 - またはターミナルで `xattr -dr com.apple.quarantine /path/to/ura-talk.app`
 
-起動後にアクセシビリティ権限を許可する。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
+起動後にアクセシビリティ権限を許可する。設定ファイルが無ければ初回起動時にコメント付きの雛形(config.example.json を埋め込んだもの)を `~/.config/ura-talk/config.json` へ自動生成し、メニューの「設定ファイルを開く…」から編集できる(反映はメニューの「再起動」)。whisper が未設定・未導入でも落ちず、文字入力のみで動く。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
 
 > 不特定多数に配るなら Apple Developer ID による署名 + notarization が必要(この構成では未対応)。社内・小チームでの共有を想定。
 

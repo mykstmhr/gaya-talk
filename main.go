@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"math/rand/v2"
@@ -44,6 +45,66 @@ import (
 	"fyne.io/systray"
 	"golang.design/x/hotkey"
 )
+
+// exampleConfig はコメント付きの設定ファイルの雛形。.app に埋め込み、初回起動時に
+// 生成する(.app の zip だけ受け取った人が make setup なしで始められるように)。
+//
+//go:embed config.example.json
+var exampleConfig []byte
+
+// ensureDefaultConfig は設定ファイルが無ければ雛形(config.example.json)を生成する。
+func ensureDefaultConfig() {
+	path := config.Path()
+	if path == "" {
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return
+	}
+	if err := os.WriteFile(path, exampleConfig, 0o644); err != nil {
+		log.Printf("設定ファイルの生成に失敗: %v", err)
+		return
+	}
+	log.Printf("初回起動: 設定ファイルを生成しました: %s", path)
+}
+
+// openConfigFile は設定ファイルを既定のテキストエディタで開く(無ければ生成してから)。
+func openConfigFile() {
+	ensureDefaultConfig()
+	path := config.Path()
+	if path == "" {
+		return
+	}
+	if err := exec.Command("open", "-t", path).Start(); err != nil {
+		log.Printf("設定ファイルを開けません: %v", err)
+	}
+}
+
+// restartApp はアプリを終了して開き直す(設定変更の反映用)。多重起動防止の
+// ファイルロックが解放されるのを待つ必要があるため、少し眠ってから開き直す
+// 子プロセスに任せて自分は終了する。
+func restartApp() {
+	exe, err := os.Executable()
+	if err != nil {
+		log.Printf("再起動できません: %v", err)
+		return
+	}
+	var cmd *exec.Cmd
+	if i := strings.Index(exe, ".app/Contents/MacOS/"); i >= 0 {
+		cmd = exec.Command("/bin/sh", "-c", `sleep 1; open "$0"`, exe[:i+len(".app")])
+	} else {
+		cmd = exec.Command("/bin/sh", "-c", `sleep 1; exec "$0"`, exe)
+	}
+	if err := cmd.Start(); err != nil {
+		log.Printf("再起動できません: %v", err)
+		return
+	}
+	log.Println("再起動します…")
+	systray.Quit()
+}
 
 // setupLogging は、.app バンドルから起動された場合にログを ~/Library/Logs/ura-talk.log へ出す。
 // Finder/launchd 起動では stdout が /dev/null(文字デバイス)になり stderr も失われるため、
@@ -178,11 +239,23 @@ type output struct {
 	name string
 }
 
+// voiceUnavailable は音声入力に必要な whisper が使えない理由を返す(使えるなら空)。
+// 起動を止めるほどのことではないので、呼び出し側は文字入力のみへフォールバックする。
+func voiceUnavailable(cfg *config.Config) string {
+	if cfg.Whisper.Model == "" {
+		return "whisper.model が未設定"
+	}
+	if _, err := os.Stat(cfg.Whisper.Model); err != nil {
+		return "whisper モデルが見つかりません: " + cfg.Whisper.Model
+	}
+	if _, err := exec.LookPath(cfg.Whisper.Bin); err != nil {
+		return "whisper-cli が見つかりません: " + cfg.Whisper.Bin
+	}
+	return ""
+}
+
 // buildSink は送り先を決める。オーバーレイ(ルーム共有)固定。dryRun は送らず表示のみ。
 func buildSink(cfg *config.Config, dryRun bool) output {
-	if cfg.Whisper.Model == "" {
-		log.Fatalf("設定エラー: whisper.model が未設定です(ggml モデルのパス)")
-	}
 	if dryRun {
 		return output{name: "ドライラン(送信しません)"} // send は nil
 	}
@@ -230,6 +303,19 @@ func onReady(dryRun bool) func() {
 		// キー情報は下部に 1 行だけ(内容は serve で確定して Show する)。
 		mInfoKeys = newInfoItem()
 		addNameMenuItem()
+		mOpenConfig := systray.AddMenuItem("設定ファイルを開く…", "設定(config.json)をテキストエディタで開く。変更の反映は「再起動」")
+		go func() {
+			for range mOpenConfig.ClickedCh {
+				openConfigFile()
+			}
+		}()
+
+		systray.AddSeparator()
+		mRestart := systray.AddMenuItem("再起動", "アプリを開き直す(設定変更の反映)")
+		go func() {
+			<-mRestart.ClickedCh
+			restartApp()
+		}()
 		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
 		go func() {
 			<-mQuit.ClickedCh
@@ -405,6 +491,7 @@ func acquireSingleInstance() bool {
 // serve は本体処理:設定読込→送り先決定→録音・ホットキー→常駐ループ。
 // systray のメインループ上(別 goroutine)で動く。dryRun のときは送らず表示のみ。
 func serve(dryRun bool) {
+	ensureDefaultConfig()
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("設定エラー: %v", err)
@@ -440,6 +527,16 @@ func serve(dryRun bool) {
 	// voice.input が "off" なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く。
 	if cfg.Voice.Input == config.VoiceOff {
 		log.Println("ℹ️ 音声入力は無効です(文字入力バーのみ)。")
+		updateKeyInfo(cfg)
+		tray.setBase(iconIdle, "待機中(文字入力のみ)…", "")
+		return
+	}
+
+	// 音声を使う設定でも whisper が揃っていなければ、落とさず文字入力のみで動く
+	// (.app の zip だけ受け取って config なしで起動したケースを含む)。
+	if reason := voiceUnavailable(cfg); reason != "" {
+		log.Printf("ℹ️ 音声入力は無効です(%s)。文字入力のみで起動します。声も使う手順は README の「声でも参加する」を参照。", reason)
+		cfg.Voice.Input = config.VoiceOff
 		updateKeyInfo(cfg)
 		tray.setBase(iconIdle, "待機中(文字入力のみ)…", "")
 		return
