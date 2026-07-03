@@ -1,4 +1,4 @@
-.PHONY: help build clean setup app app-open model whisper-model enhance-model restart logs
+.PHONY: help build clean setup setup-lite app app-open dist model whisper-model enhance-model restart logs
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -38,6 +38,20 @@ setup: ## 初回セットアップ(config 配置 + whisper モデルを選んで
 	fi
 	@$(MAKE) whisper-model
 
+# 文字だけで参加する人向け: config を配置し voice_input を off にする。
+# whisper モデルは取得しない(マイク・whisper・Ollama すべて不要)。
+setup-lite: ## 軽量セットアップ(文字だけで参加。config 配置・voice_input off・モデル不要)
+	@mkdir -p $(dir $(CONFIG))
+	@if [ -f "$(CONFIG)" ]; then \
+	  echo "既にあります(上書きしません): $(CONFIG)"; \
+	  echo "文字だけで使うなら voice_input を \"off\" にしてください。"; \
+	else \
+	  cp config.example.json "$(CONFIG)"; \
+	  sed -i '' 's/"voice_input": *"[^"]*"/"voice_input": "off"/' "$(CONFIG)"; \
+	  echo "配置しました(voice_input=off): $(CONFIG)"; \
+	fi
+	@echo "次: make app-open → アクセシビリティを許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る"
+
 build: ## バイナリをビルド(bin/ura-talk)
 	go build $(LDFLAGS) -o bin/ura-talk .
 
@@ -58,6 +72,17 @@ app: build ## .app を生成して署名する
 # 生成した .app を起動する(ログは ~/Library/Logs/ura-talk.log)。
 app-open: app ## .app をビルドして起動する
 	open $(APP)
+
+# 配布用に .app を zip 化する(チームへ配って各自ビルド不要にする)。
+# 注意: 自己署名/アドホック署名のため、受け取った人は Gatekeeper で初回だけ
+# 「右クリック→開く」か quarantine 属性の削除が必要(下に案内を出す)。
+dist: app ## 配布用に .app を zip 化(dist/ura-talk.app.zip)
+	@mkdir -p dist
+	@rm -f dist/ura-talk.app.zip
+	@ditto -c -k --sequesterRsrc --keepParent $(APP) dist/ura-talk.app.zip
+	@echo "作成: dist/ura-talk.app.zip"
+	@echo "配布先での初回起動: アプリを右クリック→「開く」(またはターミナルで xattr -dr com.apple.quarantine /path/to/ura-talk.app)"
+	@echo "起動後にアクセシビリティ権限を許可。音声も使うなら別途 whisper-cpp とモデルが必要。"
 
 # 起動中の ura-talk を停止して開き直す(config 変更の反映など)。
 # -x はプロセス名で完全一致するので、pkill 自身のシェル行を誤爆しない。

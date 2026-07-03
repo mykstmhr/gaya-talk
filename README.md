@@ -4,133 +4,108 @@
 
 イメージは「**副音声 / 裏トーク**」。Gather / Google Meet / Zoom などの会議で、本線を邪魔せず相槌・短いコメントを声やタイプでそっと流す用途。ビデオツール非依存で、どのアプリの上にも流れる(クリックは下のアプリへ素通し)。**会議の画面共有・収録には映らない**ので、裏トークが相手に見えることはない。
 
-- **入口**: `右Shift+右⌘` で音声リッスン / `右⌘` で文字入力バー(どちらも config で変更可)
+- **入口はオーバーレイだけ**: `右⌘` で文字入力バー / `右Shift+右⌘` で音声リッスン(どちらも config で変更可)
 - **共有**: ランダムな URL のルームを作り、メンバーに渡すだけ。本文は **E2E 暗号化**され、中継サーバには暗号文しか渡らない
-- **入力方式**: `vad`(無音で自動区切り・既定) / `ptt`(押している間だけ録音)
-- 音声・文字起こし・整形はすべてローカル完結。メニューバー常駐(マイクのアイコン。聞き取り中はオレンジ)
+- 音声・文字起こし・整形はすべてローカル完結。メニューバー常駐
+
+読む人ごとに 3 つに分かれています:
+
+- [**Room 参加者向け**](#room-参加者向け) — 招待された人。最低限で参加してコメントを流す
+- [**Room 管理者向け(ホスト)**](#room-管理者向けホスト) — ルームを作って配る人。中継サーバや Slack 記録の設定
+- [**開発者向け**](#開発者向け) — ビルド・配布・構成・設定リファレンス
+
+共通で **macOS (Apple Silicon)** が必要です。
 
 ---
 
-# 利用者向け
+# Room 参加者向け
 
-## 必要なもの
+招待 URL を受け取って参加する人向け。**参加に必要なサーバ情報と復号鍵は招待 URL の中に入っている**ので、中継サーバの URL などを自分で設定する必要はありません。
 
-- macOS (Apple Silicon)
-- whisper.cpp(`brew install whisper-cpp`)
-- ルームでメンバーと共有するなら、中継サーバ(`server/`)を自分の Cloudflare アカウントにデプロイ → [中継サーバ](#中継サーバルーム共有に必要)
+## 文字だけで参加する(最軽量)
 
-## セットアップ
+会議音声をスピーカーで流している人や、音声入力が要らない人はこれで十分です。**whisper.cpp もモデルもマイクも Ollama も不要**です。
 
 ```sh
-brew install whisper-cpp   # 文字起こしエンジン(初回のみ)
-make setup                 # config を配置 + whisper モデルを選んで取得(番号選択)
-make app-open              # .app をビルドして起動。初回はマイク/アクセシビリティを許可
+brew install go            # ビルドに必要(未導入なら)
+make setup-lite            # config を配置し voice_input を off に(モデルは取得しない)
+make app-open              # .app をビルドして起動
 ```
 
-- 設定は **`~/.config/ura-talk/config.json`**(`make setup` が配置。`.app` はここを読む)。全項目は[設定](#設定-configjson)を参照。
-- config を編集したら **`make restart`** で反映。
-- モデルは `~/.config/ura-talk/models/`。`make setup` 時に **番号で選択**(1=turbo 速い・軽い / 2=large-v3 高精度・重い / 3=turbo 量子化 最軽量)。あとから変えたいときは **`make whisper-model`** で選び直す。特定モデルを直接入れるなら `make model MODEL=<ファイル名>`。
+または、ホストから **`ura-talk.app` の zip を受け取った場合**は、ビルド不要で解凍して起動できます(初回だけ Gatekeeper のため右クリック →「開く」。詳細は[配布](#配布用ビルド))。
 
-> 見た目だけ先に試すなら `make build && ./bin/ura-talk overlay-demo`(サンプルコメントが流れる)。
+起動したら:
 
-### 権限
+1. 初回のみ **アクセシビリティ権限**を許可(`右⌘` の入力バー検知に使う。システム設定 → プライバシーとセキュリティ → アクセシビリティ)
+2. メニューバーのアイコン →「**ルームに URL で参加…**」に招待 URL を貼る(コピー済みなら自動で入る。貼り付けは `Cmd+V` 可)
+3. **`右⌘`** で画面下部に入力バーが出る。打って **Enter で流して閉じる**、**Esc でキャンセル**
 
-初回起動時に **マイク**(録音)と **アクセシビリティ/入力監視**(グローバルホットキー検知)の両方を許可する(システム設定 → プライバシーとセキュリティ)。`.app` で起動しているので、権限は「ura-talk.app」に紐づく。
+## 声でも参加する
 
-<details>
-<summary><strong>再ビルドで権限が失効する場合(安定した自己署名で署名する)</strong></summary>
+イヤホン/ヘッドホンで会議音声を聞くなら、声もそのまま流せます(スピーカー出力だと相手の声をマイクが拾ってしまうため、後述のとおり自動でオフになります)。
 
-`make app` は安定した自己署名証明書 `ura-talk-dev` で署名する。この証明書がキーチェーンに無いとアドホック署名にフォールバックし、再ビルドのたびに身元が変わって**付与済みのアクセシビリティ等の許可が失効**する。一度だけ証明書を作っておけば解消する:
+```sh
+brew install whisper-cpp   # 文字起こしエンジン
+make setup                 # config 配置 + whisper モデルを番号で選んで取得
+make app-open
+```
 
-1. **Keychain Access** → メニュー **証明書アシスタント → 証明書を作成…**
-2. 名前 `ura-talk-dev` / 固有名のタイプ **自己署名ルート** / 証明書のタイプ **コード署名**
-3. 以後 `make app` はこの証明書で署名する(別名なら `make app SIGN_IDENTITY="名前"`)
-4. アクセシビリティ/入力監視/マイクを一度だけ許可すれば、再ビルドしても許可が残る
-</details>
+- 初回に **マイク権限**も許可する
+- **`右Shift+右⌘`** で音声リッスンの開始/停止(VAD)。話すと無音の切れ目で自動区切りして流れる。もう一度キーで停止
+- `voice_input` は既定 `"auto"`: **イヤホン出力ならオン、スピーカー出力なら自動オフ**(相手の声を拾わないため)。イヤホンを抜き差しすると自動で切り替わる。常に使うなら `"on"`
+- (任意)日本語をきれいに整形したいなら Ollama → [ローカル LLM 整形](#ローカル-llm-整形任意)
 
-## 使い方
+## 使うときのコツ
 
-メニューバーのアイコンで状態が分かる: **マイク(黒)** 待機 / **マイク(オレンジ)** 聞き取り中 / **赤丸の点滅** 音声検出中 / **吹き出し** 文字起こし中。アイコンをクリックすると現在の状態・動作情報(`方式` / `キー`)とルーム操作メニューが開く。
-
-### コメントを流す
-
-- **音声**: `右Shift+右⌘` でリッスン開始(VAD)。話すと無音の切れ目で自動区切りして流れる。もう一度キーで停止。PTT のときは押している間だけ録音。
-- **文字**: `右⌘` で画面下部に入力バーが出る。打って **Enter で流して閉じる**、**Esc でキャンセル**。入力バーは今カーソルがあるモニターに出る。
-
-どちらも whisper→ローカル LLM 整形を通ってからオーバーレイに流れる(整形は任意)。
-
-> **音声入力の自動オフ(`voice_input`)**: スピーカーで会議音声を流していると内蔵マイクが相手の声も拾ってしまう(macOS のエコーキャンセルは各アプリ個別で、ura-talk の録音には効かない)。そこで既定の **`"auto"`** では、**出力がスピーカー(内蔵・HDMI 等)のときは音声入力を自動でオフ**にし、**イヤホン/ヘッドホン(Bluetooth・USB・ヘッドホン端子)のときはオン**にする。イヤホンを抜き差しすると自動で切り替わる(再起動不要)。常に音声を使うなら `"on"`、文字入力バー(`右⌘`)だけで使う(マイク/whisper 不要)なら `"off"`。
-
-### メンバーと共有する(ルーム)
-
-1. ホストがメニューバー →「**新規ルームを作成 — 匿名**」または「**— 記名**」。共有 URL がクリップボードに入る
-2. その URL を Slack の DM などでメンバーに渡す(URL の `#k=…` に**復号鍵**が入るので、パスワード同様に扱う)
-3. メンバーはメニューバー →「**ルームに URL で参加…**」。コピー済みなら自動で入るのでそのまま参加
-4. 以降、全員のコメントが全員の画面に流れる。後から人を呼ぶときは「**このルームの URL をコピー**」
-5. 終わったら「**ルームから退出**」。全員が抜けてアイドルになればルームは中継サーバ上から自然消滅する(履歴はどこにも残らない)
-
-**ソロモード**: ルーム未参加(または `room.server` 未設定)でも、自分のコメントは自分の画面に流れる。
-
-### Slack に記録する(任意)
-
-ルームのコメントを Slack チャンネルに残したいときは、**参加者のうち 1 人(ミラー役、通常はホスト)** だけが Slack を設定すればよい(他のメンバーは何も要らない)。復号済みのコメントはミラー役のクライアントが持っているので、そこから転送する(中継サーバは本文を復号できない)。
-
-1. Slack アプリを作成 → **Bot Token Scopes** に `chat:write` → ワークスペースにインストールして **Bot Token(`xoxb-…`)** を取得 → 投稿先チャンネルに bot を招待
-2. config の `room.slack_bot_token`(または環境変数 `URATALK_SLACK_BOT_TOKEN`)を設定。`room.slack_channel` は作成時に尋ねられるチャンネルの既定値
-3. **「新規ルームを作成」時に記録先チャンネルを尋ねられる**(空欄で記録なし)。指定するとそのチャンネルが**ルームの URL に紐づき**、作成者は自動で記録を開始する。ルームごとに別チャンネルにできる
-4. **記録対象のルームは全参加者に見える**: そのルームに入ると、トークンの有無に関係なく「🔴 このルームは Slack に記録されます」がオーバーレイに出て、メニューの状態にも `🔴Slack記録対象` と表示される(透明性)
-5. 記録はメニューの **「Slack に記録」** で止める/再開できる(退出・切断で自動停止)
-
-投稿は bot(アプリ)名義なので、匿名ルームなら Slack 上でも匿名のまま。記名ルームなら `[表示名]` 付き。親メッセージ 1 本の下にスレッドで溜まる(チャンネルを汚さない)。ミラー役が複数いると二重投稿になるので、記録するのは 1 人だけにすること。
-
-**匿名 / 記名**: 既定の匿名ルームではコメントに名前は付かない(起動ごとのランダムな色で同一人物を追える)。「記名」で作ったルームでは各コメントに `[表示名]` が付く。表示名は `room.display_name`、未設定なら**記名ルームの作成/参加時に入力を求められる**(入力した名前は内部ファイルに保存され次回以降は聞かれない)。あとから変えるにはメニューの「**表示名を変更…**」(現在の名前が併記される。`display_name` を config に設定している場合はそちらが優先で、この項目は無効)。匿名/記名はルーム作成者が決め、共有 URL に含まれるので参加者全員で揃う(URL の `&n=1` が記名)。
+- コメントは**接続中の全モニター**に流れる。会議ウィンドウがどの画面にあっても見える
+- **画面共有には映らない**ので、Meet で画面共有していても裏トークは相手に見えない
+- 匿名ルームでは名前は付かない(起動ごとのランダムな色で同一人物を追える)。記名ルームでは各コメントに `[表示名]` が付く。記名ルームに初めて入るときは表示名を聞かれる(あとで「表示名を変更…」から変えられる)
+- **`🔴Slack記録対象`** と出るルームは、ホストが Slack への記録を設定している(→ コメントが Slack チャンネルにも残る)
 
 ## 困ったとき
 
 **声が小さい・認識が悪い**(効く順):
-1. **自動ゲイン**(既定 ON)。まだ小さいなら `gain.max_gain` を `12 → 20`。
-2. **VAD で拾われない**: `URATALK_DEBUG=1 ./bin/ura-talk dryrun` で喋ったときの `rms=` を見て、`vad.threshold` をその少し下に。
-3. **初期プロンプト** `whisper_prompt` に想定する口調・語彙(相槌など)を入れる。
-4. **no-speech 閾値** `whisper_no_speech_thold` を `0.6 → 0.3`(小声を拾うが幻聴増→フィルタで吸収)。
-5. **ビーム幅** `whisper_beam_size` を `5 → 8`(精度↑・速度↓)。
+1. **自動ゲイン**(既定 ON)。まだ小さいなら `gain.max_gain` を `12 → 20`
+2. **VAD で拾われない**: `URATALK_DEBUG=1 ./bin/ura-talk dryrun` で喋ったときの `rms=` を見て `vad.threshold` をその少し下に
+3. **初期プロンプト** `whisper_prompt` に想定する口調・語彙(相槌など)を入れる
 
-**マルチモニター**: コメントは接続中の全モニターに流れる。入力バーはカーソルのあるモニターに出る。モニターを抜き差ししたらアプリを再起動する(起動時の画面構成でオーバーレイを作るため)。
+**マイクに切り替えたのに音声が入らない**: 出力がスピーカーだと `voice_input: "auto"` は自動オフになる(メニューに「音声オフ(スピーカー出力中)」)。イヤホンにするか `voice_input: "on"`。
 
-**Whisper の幻聴**: 無音・雑音区間に「ご視聴ありがとうございました」等の定型句が出ることがある。末尾無音をトリムしたうえで既知フレーズ(`internal/transcribe/whisper.go` の `hallucinations`)を除外する。他の幻聴句が出たらこのリストに追加する。
+**モニターを抜き差ししたらコメントが出ない/位置がおかしい**: 起動時の画面構成でオーバーレイを作るため、構成を変えたらアプリを再起動する(メニュー →「終了」→ 再 open、または `make restart`)。
 
 **Bluetooth イヤホンで再生音が途切れる**: 録音開始時にイヤホンが通話プロファイル(HFP)へ切り替わるため(macOS の仕様)。`./bin/ura-talk devices` で内蔵マイク名を調べ、`input_device` に指定して録音だけ内蔵マイクに固定すると回避できる。
+
+## ショートカットキーの変更
+
+`hotkey`(音声リッスン)と `room.input_hotkey`(文字入力バー)で変更(使えるキー名は `./bin/ura-talk keys`)。変更後は `make restart`。
+
+- **単体修飾キー**(`mods` 空): `rightcmd` / `leftcmd` / `rightoption` / `leftoption` / `rightshift` / `leftshift` / `fn`
+- **修飾キー2つのコード**: `mods` に押しっぱなしにする側を1つ(例 `{"mods":["rightshift"],"key":"rightcmd"}` = 右⇧+右⌘)。JIS 配列に右⌥ が無い場合に便利
+- `hotkey` と `input_hotkey` は別のキーにすること。CGEventTap で検出するため要アクセシビリティ権限(監視のみ)
 
 ## ローカル LLM 整形(任意)
 
 whisper の生出力(句読点なし・かな漢字揺れ・フィラー混じり)を **ローカル LLM(Ollama)で整形**する。音声・テキスト処理ともにローカル完結。
 
 ```sh
-brew install ollama    # 未導入なら
-make enhance-model      # 候補から番号で選ぶと pull + config 更新
-make restart            # 反映
+brew install ollama
+make enhance-model          # 候補から番号で選ぶと pull + config 更新
+make restart
 ```
 
-- `ollama serve` の手動起動は不要(enhance 有効時、起動時に稼働確認し、無ければ自動起動)。
-- 翻訳・加筆を禁止するプロンプトで整形。**失敗時は生テキストをそのまま流す**ので壊れない。
-- **`endpoint` には発話本文がそのまま送られる**。既定(`enhance.allow_remote: false`)では `localhost` / `127.0.0.1` / `::1` 以外の `endpoint` を拒否し、発話が外部に流出しないようにする。意図的にリモート Ollama を使う場合のみ `enhance.allow_remote: true`。
+- `ollama serve` の手動起動は不要(enhance 有効時、起動時に稼働確認し無ければ自動起動)
+- 翻訳・加筆を禁止するプロンプトで整形。**失敗時は生テキストをそのまま流す**ので壊れない
+- **`endpoint` には発話本文が送られる**。既定(`enhance.allow_remote: false`)では `localhost` 以外の `endpoint` を拒否し、発話が外部に流出しないようにする
 
-## ショートカットキーの変更
+---
 
-`hotkey`(音声リッスン)と `room.input_hotkey`(文字入力バー)で変更(使えるキー名は `./bin/ura-talk keys`)。変更後は `make restart`。
+# Room 管理者向け(ホスト)
 
-```jsonc
-"hotkey": { "mods": ["rightshift"], "key": "rightcmd" }  // 既定: 右⇧を押しながら右⌘
-"room": { "input_hotkey": { "mods": [], "key": "rightcmd" } }  // 既定: 右⌘ 単体
-```
+ルームを作ってメンバーに配る人向け。参加者向けのセットアップに加えて、**中継サーバのデプロイ**が要ります(ルーム作成に使う)。
 
-- **単体修飾キー**(`mods` 空): `rightcmd` / `leftcmd` / `rightoption` / `leftoption` / `rightshift` / `leftshift` / `fn`。
-- **修飾キー2つのコード**: `mods` に押しっぱなしにする側を1つ書く(例 `["rightshift"]` + `"rightcmd"` = 右⇧+右⌘)。JIS 配列に右⌥ が無い場合に便利。
-- **組み合わせ**: `mods` = `ctrl`/`shift`/`option`(`alt`)/`cmd`、`key` = `a`〜`z` / `0`〜`9` / `f1`〜`f20` / `space` / `return` など。
-- CGEventTap で検出するため要アクセシビリティ権限(監視のみ、本来の動作は奪わない)。`hotkey` と `input_hotkey` は別のキーにすること。
+## 中継サーバをデプロイする
 
-## 中継サーバ(ルーム共有に必要)
-
-`server/` を自分の Cloudflare アカウントにデプロイして使う(Durable Objects + WebSocket Hibernation。無料枠で収まる想定)。
+`server/` を自分の Cloudflare アカウントにデプロイする(Durable Objects + WebSocket Hibernation。無料枠で収まる想定。サーバは本文を復号できず、何も永続化しない)。
 
 ```sh
 cd server
@@ -139,40 +114,28 @@ npx wrangler login    # ブラウザで Cloudflare に認可(初回のみ)
 npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.dev を控える
 ```
 
-デプロイした URL を config の `room.server` に設定する。サーバは本文を復号できず、何も永続化しない。詳細は [server/README.md](server/README.md)、設計は [docs/room-overlay-design.md](docs/room-overlay-design.md)。
+デプロイした URL を config の **`room.server`** に設定する(ルーム作成に使う。参加するだけの人には不要)。詳細は [server/README.md](server/README.md)、設計は [docs/room-overlay-design.md](docs/room-overlay-design.md)。
 
-## 設定 (config.json)
+## ルームを作って配る
 
-**コメントを書ける**(JSONC)。`//` 行コメント・`/* */` ブロックコメント・末尾カンマを許可する(`make setup` が配置する `config.example.json` 自体が各項目コメント付き)。環境変数 `URATALK_WHISPER_MODEL` / `URATALK_CONFIG` で上書き可能。
+メニューバーのアイコンから:
 
-<details>
-<summary>主な設定キー(クリックで展開)</summary>
+- **「新規ルームを作成 — 匿名」** … 名前の出ないルーム
+- **「新規ルームを作成 — 記名」** … 各コメントに `[表示名]` が付くルーム。作成/参加時に自分の表示名を確定する(`room.display_name`、未設定なら入力を促す)
 
-| キー | 説明 | 既定 |
-|---|---|---|
-| `room.server` | 中継サーバ URL(`server/` のデプロイ先)。空ならソロモード | `""` |
-| `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式。コードも可) | `rightcmd` |
-| `room.display_name` | 記名ルームで名乗る表示名。空なら作成/参加時に入力を促す(内部保存) | `""` |
-| `room.slack_bot_token` | Slack ミラーの bot token(`xoxb-…`)。env `URATALK_SLACK_BOT_TOKEN` でも可 | `""` |
-| `room.slack_channel` | Slack ミラーの投稿先チャンネル(ID 推奨) | `""` |
-| `voice_input` | 音声入力の可否。`auto`(出力がイヤホンならオン/スピーカーなら自動オフ) / `on` / `off`(文字のみ・マイク不要)。旧 `true`/`false` も可 | `auto` |
-| `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |
-| `hotkey` | 音声リッスンのホットキー(単体修飾キー / mods+key / コード) | `rightshift+rightcmd` |
-| `whisper_bin` | whisper-cli の実行パス | `whisper-cli` |
-| `whisper_model` | ggml モデルのパス(`~` 展開可) | (必須) |
-| `input_device` | 録音に使うマイク名(部分一致)。空でシステム既定 | (既定) |
-| `language` | 文字起こし言語(`auto` で自動判定) | `ja` |
-| `gain.enabled` / `gain.target_peak` / `gain.max_gain` | 録音音声の自動ゲイン | `true` / `0.95` / `12` |
-| `whisper_prompt` | 初期プロンプト(口語・語彙のヒント) | (なし) |
-| `whisper_beam_size` | ビーム幅(上げると精度↑・速度↓) | `5` |
-| `whisper_no_speech_thold` | no-speech 閾値(0で既定0.6) | `0`(=0.6) |
-| `enhance.*` | ローカル LLM(Ollama)整形。`enabled` / `model` / `endpoint` / `allow_remote` 等 | `enabled:true` |
-| `emoji.mode` | 末尾に絵文字を付ける。`off` / `light` / `cheerful` | `off` |
-| `vad.*` | 無音区切りのパラメータ(`threshold` / `silence_ms` 等) | 本文参照 |
-| `sound.*` | 開始/停止の効果音 | `Submarine` / `Bottle` |
-| `min_duration_ms` | これ未満の録音は無視(誤爆防止) | `300` |
+作成すると共有 URL がクリップボードに入るので、メンバーに渡す。**URL の `#k=…` に復号鍵が入る**ので、パスワード同様に扱う(公開チャンネルより DM 推奨)。後から人を呼ぶときは「**このルームの URL をコピー**」。全員が退出してアイドルになればルームは中継サーバ上から自然消滅する(履歴はどこにも残らない)。
 
-</details>
+## Slack に記録する(任意)
+
+ルームのコメントを Slack チャンネルに残したいときは、**あなた(ミラー役)だけ**が Slack を設定すればよい(他のメンバーは何も要らない)。復号済みコメントはあなたのクライアントが持っているので、そこから転送する(中継サーバは本文を復号できない)。
+
+1. Slack アプリを作成 → **Bot Token Scopes** に `chat:write` → ワークスペースにインストールして **Bot Token(`xoxb-…`)** を取得 → 投稿先チャンネルに bot を招待
+2. config の `room.slack_bot_token`(または環境変数 `URATALK_SLACK_BOT_TOKEN`)を設定。`room.slack_channel` は作成時に尋ねられるチャンネルの既定値
+3. **「新規ルームを作成」時に記録先チャンネルを尋ねられる**(空欄で記録なし)。指定するとそのチャンネルが**ルームの URL に紐づき**、作成者は自動で記録を開始する。ルームごとに別チャンネルにできる
+4. **記録対象のルームは全参加者に見える**: 入ると「🔴 このルームは Slack に記録されます」がオーバーレイに出て、メニュー状態にも `🔴Slack記録対象` と表示される(透明性)
+5. 記録はメニューの **「Slack に記録」** で止める/再開できる(退出・切断で自動停止)
+
+投稿は bot(アプリ)名義なので、匿名ルームなら Slack 上でも匿名のまま。記名ルームなら `[表示名]` 付き。親メッセージ 1 本の下にスレッドで溜まる。**ミラー役が複数いると二重投稿になる**ので、記録するのは 1 人だけにすること。
 
 ---
 
@@ -181,24 +144,48 @@ npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.
 ## ビルドと実行
 
 ```sh
-make           # ターゲット一覧(help)
-make build     # bin/ura-talk を生成
-make app       # build/ura-talk.app を生成して署名
-make app-open  # ビルドして .app を起動
-make restart   # 起動中の .app を停止して開き直す(再ビルドはしない)
-make clean     # bin / .app を削除
-make logs      # .app のログを追尾(tail -f)
+make            # ターゲット一覧(help)
+make build      # bin/ura-talk を生成
+make app        # build/ura-talk.app を生成して署名
+make app-open   # ビルドして .app を起動
+make restart    # 起動中の .app を停止して開き直す(再ビルドはしない)
+make dist       # 配布用に .app を zip 化(dist/ura-talk.app.zip)
+make clean      # bin / .app を削除
+make logs       # .app のログを追尾(tail -f)
 ```
 
 > 端末から直接動作確認するなら `go run . dryrun` / `go run . devices` / `go run . overlay-demo`。ただしメニューバー常駐(ホットキー)の権限は署名済み `.app` に紐づくので、実挙動の確認は `make app-open` を使う。
 
 Go 1.26.4+ が必要。Finder/`.app` 起動では作業ディレクトリが `/` になるため、設定は `~/.config/ura-talk/config.json` を読む。ログは `.app` 起動時 `~/Library/Logs/ura-talk.log`(パーミッション `0600`)、端末起動時は標準エラー。発話本文は既定でログに残さず(文字数のみ)、`URATALK_DEBUG=1` のときだけ本文を出す。多重起動はファイルロックで防止。
 
+### 配布用ビルド
+
+`make dist` が `dist/ura-talk.app.zip` を作る。ビルド環境の無いメンバーに配れる。ただし **自己署名/アドホック署名**なので、受け取った人は初回のみ Gatekeeper を通す必要がある:
+
+- Finder でアプリを**右クリック →「開く」**(以後は普通に起動できる)
+- またはターミナルで `xattr -dr com.apple.quarantine /path/to/ura-talk.app`
+
+起動後にアクセシビリティ権限を許可する。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
+
+> 不特定多数に配るなら Apple Developer ID による署名 + notarization が必要(この構成では未対応)。社内・小チームでの共有を想定。
+
+### 署名(権限を失効させない)
+
+`make app` は安定した自己署名証明書 `ura-talk-dev` で署名する。この証明書がキーチェーンに無いとアドホック署名にフォールバックし、再ビルドのたびに身元が変わって**付与済みの権限が失効**する。一度だけ証明書を作れば解消する: Keychain Access → 証明書アシスタント → 証明書を作成 → 名前 `ura-talk-dev` / 自己署名ルート / コード署名。別名なら `make app SIGN_IDENTITY="名前"`。
+
+## テスト
+
+```sh
+go test ./internal/...                                   # 単体テスト
+URATALK_E2E_SERVER=https://<your>.workers.dev go test ./internal/room -run E2E   # 実サーバ相手の疎通
+cd server && npm test                                    # 中継サーバ(vitest)
+```
+
 ## 構成
 
 ```
 main.go                          サブコマンド(run/dryrun/devices/keys/overlay-demo)・メニューバー常駐・PTT/VAD ループ
-room_ui.go                       ルームのメニュー配線・送受信(作成/参加/退出・URLコピー・ソロモードのフォールバック)
+room_ui.go                       ルームのメニュー配線・送受信(作成/参加/退出・URLコピー・表示名・Slack記録の配線)
 internal/config/config.go        設定の読み込み・検証(JSONC)
 internal/recorder/recorder.go    マイク録音 (malgo)。バッファ録音とストリーム録音
 internal/vad/vad.go              音声ストリームを無音で発話単位に区切る(VAD)
@@ -208,17 +195,52 @@ internal/room/                   ルーム: 共有 URL・E2E 暗号化(AES-GCM)�
 internal/overlay/                ニコニコ風オーバーレイ(透過・クリック貫通・全モニター・画面共有に映らない)
 internal/inputbar/               Spotlight 風の文字入力バー(非アクティブ化パネル)
 internal/dialog/                 モーダル入力ダイアログ(URL 参加・表示名入力用)
-internal/slack/slack.go          Slack ミラー(bot token で chat.postMessage・スレッド投稿)
-internal/audioout/                既定の音声出力(イヤホン/スピーカー)を判定・監視(voice_input:auto 用)
+internal/audioout/               既定の音声出力(イヤホン/スピーカー)を判定・監視(voice_input:auto 用)
+internal/voicegate/              音声入力の可否(auto の出力追従・リッスン中の自動停止)を集約
+internal/namestore/              記名ルームの表示名を config とは別の内部ファイルに永続化
+internal/mirror/                 Slack ミラーの状態機械(親メッセージ→スレッド転送)
+internal/slack/slack.go          Slack 投稿(bot token で chat.postMessage・スレッド投稿)
 internal/modkey/modkey_darwin.go 単体修飾キー・修飾キー2つのコードを CGEventTap で検出(複数キー監視可)
 internal/trayicon/trayicon.go    メニューバーのアイコン(待機/聞き取り=オレンジ/録音/文字起こし)
 server/                          ルームの中継サーバ(Cloudflare Workers + Durable Objects)
 ```
 
+## 設定リファレンス (config.json)
+
+**コメントを書ける**(JSONC)。`//` 行コメント・`/* */` ブロックコメント・末尾カンマを許可する(`make setup` が配置する `config.example.json` 自体が各項目コメント付き)。環境変数 `URATALK_WHISPER_MODEL` / `URATALK_SLACK_BOT_TOKEN` / `URATALK_CONFIG` で上書き可能。
+
+<details>
+<summary>主な設定キー(クリックで展開)</summary>
+
+| キー | 説明 | 既定 |
+|---|---|---|
+| `voice_input` | 音声入力の可否。`auto`(イヤホンでオン/スピーカーで自動オフ) / `on` / `off`(文字のみ・マイク/whisper 不要) | `auto` |
+| `room.server` | 中継サーバ URL(`server/` のデプロイ先)。**作成時のみ必要**(参加は URL 内の情報を使う) | `""` |
+| `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式。コードも可) | `rightcmd` |
+| `room.display_name` | 記名ルームで名乗る表示名。空なら作成/参加時に入力を促す(内部保存) | `""` |
+| `room.slack_bot_token` | Slack ミラーの bot token(`xoxb-…`)。env `URATALK_SLACK_BOT_TOKEN` でも可 | `""` |
+| `room.slack_channel` | Slack ミラーの投稿先チャンネル(作成時プロンプトの既定値) | `""` |
+| `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |
+| `hotkey` | 音声リッスンのホットキー(単体修飾キー / mods+key / コード) | `rightshift+rightcmd` |
+| `whisper_bin` | whisper-cli の実行パス(`voice_input:off` なら不要) | `whisper-cli` |
+| `whisper_model` | ggml モデルのパス(`voice_input:off` なら不要) | (音声時に必須) |
+| `input_device` | 録音に使うマイク名(部分一致)。空でシステム既定 | (既定) |
+| `language` | 文字起こし言語(`auto` で自動判定) | `ja` |
+| `gain.*` | 録音音声の自動ゲイン(`enabled`/`target_peak`/`max_gain`) | `true`/`0.95`/`12` |
+| `whisper_prompt` / `whisper_beam_size` / `whisper_no_speech_thold` | whisper のヒント/精度/無音閾値 | 本文参照 |
+| `enhance.*` | ローカル LLM(Ollama)整形。`enabled`/`model`/`endpoint`/`allow_remote` | `enabled:true` |
+| `emoji.mode` | 末尾に絵文字。`off`/`light`/`cheerful` | `off` |
+| `vad.*` | 無音区切りのパラメータ(`threshold`/`silence_ms` 等) | 本文参照 |
+| `sound.*` | 開始/停止の効果音 | `Submarine`/`Bottle` |
+| `min_duration_ms` | これ未満の録音は無視(誤爆防止) | `300` |
+
+</details>
+
 ## ロードマップ
 
-設計と今後の予定は [docs/room-overlay-design.md](docs/room-overlay-design.md) を参照。
+設計と経緯は [docs/room-overlay-design.md](docs/room-overlay-design.md) を参照。
 
-- ~~**v1.1**: 記名モード(ルーム作成時に匿名/記名を選択)~~ ✅ 実装済み
-- ~~**v1.2**: Slack ミラー(ルームのコメントを Slack チャンネルへ転送)~~ ✅ 実装済み
-- 以降: コメント密度に応じた自動フォント縮小、モニター構成変更への自動追従、Windows クライアント(表示側のみ先行)など
+- ~~**v1**: 匿名・音声 + 入力バー・E2E・Workers デプロイ~~ ✅
+- ~~**v1.1**: 記名モード(ルーム作成時に匿名/記名を選択)~~ ✅
+- ~~**v1.2**: Slack ミラー(ルームのコメントを Slack チャンネルへ転送)~~ ✅
+- 以降の候補: コメント密度に応じた自動フォント縮小、モニター構成変更への自動追従、記録中のリアルタイム告知、配布物の署名/notarize、Windows クライアント(表示側のみ先行)など

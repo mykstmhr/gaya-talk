@@ -5,6 +5,7 @@ config.json
 /ura-talk
 /bin/
 build/ura-talk.app/
+/dist/
 
 # モデルファイル(大きいのでコミットしない)
 *.bin
