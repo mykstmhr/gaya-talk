@@ -199,12 +199,9 @@ func buildSink(cfg *config.Config, dryRun bool) output {
 // lockFile は多重起動防止のロックを保持する(プロセス終了まで開いたままにする)。
 var lockFile *os.File
 
-// mStatus は状態(待機/聞き取り/録音…)。その下に動作情報(方式/キー)を常時表示する。
-var (
-	mStatus   *systray.MenuItem
-	mInfoMode *systray.MenuItem
-	mInfoKey  *systray.MenuItem
-)
+// mInfoKeys はメニュー下部のキー情報行(例「入力バー : 右⌘ / 音声 : 右⇧+右⌘」)。
+// 状態(待機/聞き取り…)はメニューには出さず、アイコン色・画面下部のバー・ツールチップが担う。
+var mInfoKeys *systray.MenuItem
 
 // enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化。
 var enhancer *enhance.Enhancer
@@ -226,18 +223,13 @@ func onReady(dryRun bool) func() {
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
 		systray.SetTooltip("ura-talk")
 
-		mStatus = systray.AddMenuItem("起動中…", "現在の状態")
-		mStatus.Disable()
-		// 動作情報(方式/キー)は状態の下に常時表示。内容は serve で確定して Show する。
-		mInfoMode = newInfoItem()
-		mInfoKey = newInfoItem()
-
-		systray.AddSeparator()
-
-		// ルーム操作メニュー(serve から Show する)。
+		// 主軸のルーム操作を最上部に(serve から Show する)。
 		addRoomMenuItems()
 
 		systray.AddSeparator()
+		// キー情報は下部に 1 行だけ(内容は serve で確定して Show する)。
+		mInfoKeys = newInfoItem()
+		addNameMenuItem()
 		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
 		go func() {
 			<-mQuit.ClickedCh
@@ -266,7 +258,7 @@ func truncRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
-// newInfoItem は状態下の動作情報行(方式/キー)を 1 つ作る。無効・初期は非表示。
+// newInfoItem は選択できない情報行を 1 つ作る。無効・初期は非表示。
 // 内容が確定する serve で setInfo により文言をセットして表示する。
 func newInfoItem() *systray.MenuItem {
 	it := systray.AddMenuItem("", "")
@@ -362,14 +354,13 @@ func (t *trayStatus) apply() {
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
 	}
 
-	// ドロップダウンの状態テキスト(文字起こし中はそちらを優先表示)。
+	// 状態テキストはメニューに出さず、アイコンのツールチップに載せる
+	// (文字起こし中はそちらを優先表示)。
 	st := menuText
 	if n > 0 {
 		st = "文字起こし中…"
 	}
-	if mStatus != nil {
-		mStatus.SetTitle(st)
-	}
+	systray.SetTooltip("ura-talk — " + st)
 
 	// 画面下部のバー。文字入力バーが開いている間は同じ場所を譲る(閉じたら復帰)。
 	if cfg == nil || !cfg.Voice.Bar {
@@ -440,8 +431,7 @@ func serve(dryRun bool) {
 	// voice.input が "off" なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く。
 	if cfg.Voice.Input == config.VoiceOff {
 		log.Println("ℹ️ 音声入力は無効です(文字入力バーのみ)。")
-		setInfo(mInfoMode, "方式 : 文字入力のみ")
-		setInfo(mInfoKey, "入力バー : "+cfg.InputHotkey.String())
+		updateKeyInfo(cfg)
 		tray.setBase(iconIdle, "待機中(文字入力のみ)…", "")
 		return
 	}
@@ -525,9 +515,8 @@ func serve(dryRun bool) {
 	}
 	defer stopTrigger()
 
-	// 状態の下に動作情報を常時表示(方式/キー)。全角キーで幅を揃える。
-	setInfo(mInfoKey, "キー : "+cfg.Voice.Hotkey.String())
-	updateModeInfo(cfg)
+	// メニュー下部のキー情報行を確定して表示する。
+	updateKeyInfo(cfg)
 	if cfg.Voice.Input == config.VoiceAuto {
 		if voice.Allowed() {
 			log.Println("🎧 イヤホン出力を検出 → 音声入力は有効です(スピーカーに切り替えると自動オフ)。")
@@ -566,20 +555,41 @@ func applyVoiceAuto(cfg *config.Config) {
 	} else {
 		log.Println("🔈 スピーカー出力を検出 → 音声入力を無効化しました(相手の声をオーバーレイに拾わないため)。")
 	}
-	updateModeInfo(cfg)
+	updateKeyInfo(cfg)
 }
 
-// updateModeInfo は動作情報行(方式)を現在の状態に合わせて更新する。
-func updateModeInfo(cfg *config.Config) {
-	if cfg.Voice.Input == config.VoiceAuto && !voice.Allowed() {
-		setInfo(mInfoMode, "方式 : 音声オフ(スピーカー出力中)")
-		return
+// updateKeyInfo はメニュー下部のキー情報行を現在の状態に合わせて更新する。
+// 例「入力バー : 右⌘ / 音声 : 右⇧+右⌘」。音声が使えない理由(スピーカー出力中)も
+// この行に集約する。
+func updateKeyInfo(cfg *config.Config) {
+	line := "入力バー : " + prettyHotkey(cfg.InputHotkey)
+	switch {
+	case cfg.Voice.Input == config.VoiceOff:
+		// 文字入力のみ(音声のキーは出さない)
+	case cfg.Voice.Input == config.VoiceAuto && !voice.Allowed():
+		line += " / 音声 : オフ(スピーカー出力中)"
+	default:
+		line += " / 音声 : " + prettyHotkey(cfg.Voice.Hotkey)
 	}
-	if cfg.Voice.ListenMode == "vad" {
-		setInfo(mInfoMode, "方式 : VAD(自動区切り)")
-	} else {
-		setInfo(mInfoMode, "方式 : PTT(押している間だけ)")
+	setInfo(mInfoKeys, line)
+}
+
+// prettyHotkey はホットキーをメニュー表示用の記号(右⌘ 等)に変換する。
+// 未知のキー名はそのまま出す(config の表記と突き合わせられるように)。
+func prettyHotkey(h config.Hotkey) string {
+	symbols := map[string]string{
+		"rightcmd": "右⌘", "leftcmd": "左⌘", "cmd": "⌘",
+		"rightshift": "右⇧", "leftshift": "左⇧", "shift": "⇧",
+		"rightoption": "右⌥", "leftoption": "左⌥", "option": "⌥", "alt": "⌥",
+		"ctrl": "⌃",
 	}
+	parts := append(append([]string{}, h.Mods...), h.Key)
+	for i, p := range parts {
+		if s, ok := symbols[strings.ToLower(p)]; ok {
+			parts[i] = s
+		}
+	}
+	return strings.Join(parts, "+")
 }
 
 // buildTrigger はホットキー h を組み立て、押下(down)/解放(up)を流すチャネルを返す。

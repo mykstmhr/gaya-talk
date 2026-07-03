@@ -74,9 +74,11 @@ func addRoomMenuItems() {
 	mRoomCreateAnon.Hide()
 	mRoomCreateNamed = systray.AddMenuItem("新規ルームを作成 — 記名", "記名ルームを作り、共有 URL をクリップボードへ(各自の表示名が付く)")
 	mRoomCreateNamed.Hide()
+}
 
-	systray.AddSeparator()
-
+// addNameMenuItem は表示名の変更メニューを(隠したまま)作る。メニュー下部の
+// 情報セクション(キー情報行の下)に置くため、addRoomMenuItems とは別に onReady から呼ぶ。
+func addNameMenuItem() {
 	mRoomName = systray.AddMenuItem("表示名を変更…", "記名ルームで名乗る表示名を変更する")
 	mRoomName.Hide()
 }
