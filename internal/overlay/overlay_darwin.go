@@ -39,7 +39,9 @@ static CFTimeInterval gLaneFree[OVERLAY_MAX_SCREENS][OVERLAY_MAX_LANES];
 static void overlayStart(void) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (gWins) return;
-		gWins = [NSMutableArray array];
+		// cgo は ARC なしでコンパイルされるため、autorelease される +[NSMutableArray array]
+		// を static に置いてはいけない(プール解放後にダングリングする)。alloc で所有する。
+		gWins = [[NSMutableArray alloc] init];
 		for (NSScreen *scr in [NSScreen screens]) {
 			NSUInteger i = gWins.count;
 			if (i >= OVERLAY_MAX_SCREENS) break;
