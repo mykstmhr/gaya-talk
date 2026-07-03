@@ -76,3 +76,60 @@ func TestE2ERelay(t *testing.T) {
 		t.Errorf("c2 受信内容が不一致: %+v", p2)
 	}
 }
+
+// TestE2ERevoke は実サーバに対して 作成→参加→無効化→切断+再参加不可 を通しで確認する。
+// 実行方法は TestE2ERelay と同じ(URATALK_E2E_SERVER が無ければスキップ)。
+func TestE2ERevoke(t *testing.T) {
+	server := os.Getenv("URATALK_E2E_SERVER")
+	if server == "" {
+		t.Skip("URATALK_E2E_SERVER が未設定のためスキップ")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	r, err := Create(ctx, server, false, "")
+	if err != nil {
+		t.Fatalf("ルーム作成失敗: %v", err)
+	}
+	if r.AdminSecret == "" {
+		t.Fatal("サーバが adminSecret を返さない")
+	}
+
+	c := &Client{}
+	c.Join(r)
+	t.Cleanup(c.Leave)
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) && !c.Connected() {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !c.Connected() {
+		t.Fatal("接続できない")
+	}
+
+	if err := Revoke(ctx, r); err != nil {
+		t.Fatalf("無効化失敗: %v", err)
+	}
+
+	// 無効化済みルームへの参加は 410 で拒否され、OnFatal 経由で退出する。
+	fatal := make(chan string, 1)
+	c2 := &Client{OnFatal: func(reason string) { fatal <- reason }}
+	c2.Join(&Room{Server: r.Server, Token: r.Token, Key: r.Key})
+	t.Cleanup(c2.Leave)
+	select {
+	case reason := <-fatal:
+		t.Logf("無効化後の参加拒否: %s", reason)
+	case <-time.After(8 * time.Second):
+		t.Error("無効化済みルームに参加できてしまう(OnFatal が呼ばれない)")
+	}
+
+	// 間違ったシークレットでは無効化できないことも実サーバで確認しておく。
+	r2, err := Create(ctx, server, false, "")
+	if err != nil {
+		t.Fatalf("ルーム作成失敗: %v", err)
+	}
+	bad := *r2
+	bad.AdminSecret = "AAAAAAAAAAAAAAAAAAAAAA"
+	if err := Revoke(ctx, &bad); err == nil {
+		t.Error("間違ったシークレットで無効化できてしまった")
+	}
+}

@@ -31,7 +31,8 @@ func Create(ctx context.Context, server string, named bool, slackChannel string)
 		return nil, fmt.Errorf("ルーム作成に失敗: HTTP %d", resp.StatusCode)
 	}
 	var out struct {
-		Token string `json:"token"`
+		Token       string `json:"token"`
+		AdminSecret string `json:"adminSecret"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("ルーム作成レスポンスの解析に失敗: %w", err)
@@ -49,7 +50,37 @@ func Create(ctx context.Context, server string, named bool, slackChannel string)
 		Key:          key,
 		Named:        named,
 		SlackChannel: slackChannel,
+		AdminSecret:  out.AdminSecret, // 旧サーバは返さない(空のまま=無効化不可)
 	}, nil
+}
+
+// Revoke はルームを無効化する(作成者のみ)。成功すると全参加者が切断され、
+// 以後そのルームには誰も接続できなくなる。元に戻せない。
+func Revoke(ctx context.Context, r *Room) error {
+	if r.AdminSecret == "" {
+		return fmt.Errorf("管理シークレットがありません(無効化できるのはルームの作成者だけです)")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete,
+		fmt.Sprintf("%s/r/%s", trimSlash(r.Server), r.Token), nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.AdminSecret)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("無効化に失敗(サーバ %s に届きません): %w", r.Server, err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		return nil
+	case http.StatusForbidden:
+		return fmt.Errorf("無効化できません(管理シークレットが一致しません)")
+	case http.StatusNotFound:
+		return fmt.Errorf("ルームがサーバに存在しません")
+	default:
+		return fmt.Errorf("無効化に失敗: HTTP %d", resp.StatusCode)
+	}
 }
 
 func trimSlash(s string) string {
@@ -74,6 +105,9 @@ const (
 type Client struct {
 	OnMessage func(Payload)
 	OnState   func(State)
+	// OnFatal はルームが無効化・失効していて再接続が無意味なとき、退出直前に
+	// 理由とともに一度だけ呼ばれる(接続 goroutine から)。
+	OnFatal func(reason string)
 
 	mu     sync.Mutex
 	room   *Room
@@ -150,9 +184,17 @@ func (c *Client) run(ctx context.Context, r *Room) {
 	backoff := time.Second
 	for {
 		c.setState(StateConnecting)
-		conn, _, err := websocket.Dial(ctx, r.WSURL(), nil)
+		conn, resp, err := websocket.Dial(ctx, r.WSURL(), nil)
 		if err != nil {
 			if ctx.Err() != nil {
+				return
+			}
+			if reason := permanentReason(resp); reason != "" {
+				log.Printf("⛔ %s。再接続しません。", reason)
+				if c.OnFatal != nil {
+					c.OnFatal(reason)
+				}
+				c.Leave()
 				return
 			}
 			log.Printf("ルーム接続失敗(%.0f 秒後に再試行): %v", backoff.Seconds(), err)
@@ -229,6 +271,21 @@ func (c *Client) setState(s State) {
 	if changed && cb != nil {
 		cb(s)
 	}
+}
+
+// permanentReason は WebSocket ハンドシェイクの HTTP レスポンスから、再接続しても
+// 無駄な失敗(ルーム消滅など)を判定する。恒久エラーでなければ空を返す(=再試行)。
+func permanentReason(resp *http.Response) string {
+	if resp == nil {
+		return ""
+	}
+	switch resp.StatusCode {
+	case http.StatusGone: // 無効化 or 未アクティブ失効
+		return "このルームは無効化または期限切れです"
+	case http.StatusNotFound: // POST /rooms を経ていない token(旧サーバ時代の URL 等)
+		return "このルームはサーバに存在しません(URL が古い可能性)"
+	}
+	return ""
 }
 
 // jitter は再接続の同時多発を避けるため待ち時間を ±25% 揺らす。

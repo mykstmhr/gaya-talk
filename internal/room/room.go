@@ -27,6 +27,9 @@ type Room struct {
 	// URL に持たせることで「このルームは記録対象」を全参加者が知れる(透明性)。
 	// bot token は URL には入れず、記録するのは token を持つ人だけ。
 	SlackChannel string
+	// AdminSecret はルーム無効化用の管理シークレット(作成者だけが持つ)。
+	// 共有 URL には決して載せない。空なら無効化できない(=作成者でない)。
+	AdminSecret string
 }
 
 // tokenRe はサーバが発行するトークンの形(128bit base64url、パディングなし)。

@@ -72,6 +72,8 @@ make app-open
 
 **マイクに切り替えたのに音声が入らない**: 出力がスピーカーだと `voice_input: "auto"` は自動オフになる(メニューに「音声オフ(スピーカー出力中)」)。イヤホンにするか `voice_input: "on"`。
 
+**「⛔ このルームは無効化または期限切れです」と出る**: そのルームはホストが閉鎖したか、7 日間誰も使わず自動失効した。古い URL では入り直せないので、ホストに新しいルームの URL をもらう。
+
 **モニターを抜き差ししたらコメントが出ない/位置がおかしい**: 起動時の画面構成でオーバーレイを作るため、構成を変えたらアプリを再起動する(メニュー →「終了」→ 再 open、または `make restart`)。
 
 **Bluetooth イヤホンで再生音が途切れる**: 録音開始時にイヤホンが通話プロファイル(HFP)へ切り替わるため(macOS の仕様)。`./bin/ura-talk devices` で内蔵マイク名を調べ、`input_device` に指定して録音だけ内蔵マイクに固定すると回避できる。
@@ -106,13 +108,11 @@ make restart
 
 ## 中継サーバをデプロイする
 
-`server/` を自分の Cloudflare アカウントにデプロイする(Durable Objects + WebSocket Hibernation。無料枠で収まる想定。サーバは本文を復号できず、何も永続化しない)。
+`server/` を自分の Cloudflare アカウントにデプロイする(Durable Objects + WebSocket Hibernation。無料枠で収まる想定。サーバは本文を復号できず、保存もしない)。
 
 ```sh
-cd server
-npm install
-npx wrangler login    # ブラウザで Cloudflare に認可(初回のみ)
-npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.dev を控える
+(cd server && npx wrangler login)   # ブラウザで Cloudflare に認可(初回のみ)
+make deploy                         # テスト実行 → デプロイ。出力される https://ura-talk-room.<account>.workers.dev を控える
 ```
 
 デプロイした URL を config の **`room.server`** に設定する(ルーム作成に使う。参加するだけの人には不要)。詳細は [server/README.md](server/README.md)、設計は [docs/room-overlay-design.md](docs/room-overlay-design.md)。
@@ -126,7 +126,35 @@ npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.
 - **「新規ルームを作成 — 匿名」** … 名前の出ないルーム
 - **「新規ルームを作成 — 記名」** … 各コメントに `[表示名]` が付くルーム。作成/参加時に自分の表示名を確定する(`room.display_name`、未設定なら入力を促す)
 
-作成すると共有 URL がクリップボードに入るので、メンバーに渡す。**URL の `#k=…` に復号鍵が入る**ので、パスワード同様に扱う(公開チャンネルより DM 推奨)。後から人を呼ぶときは「**このルームの URL をコピー**」。全員が退出してアイドルになればルームは中継サーバ上から自然消滅する(履歴はどこにも残らない)。
+作成すると共有 URL がクリップボードに入るので、メンバーに渡す。**URL の `#k=…` に復号鍵が入る**ので、パスワード同様に扱う(公開チャンネルより DM 推奨)。後から人を呼ぶときは「**このルームの URL をコピー**」。コメントの履歴はどこにも残らない(サーバは中継するだけで保存しない)。
+
+## ルームの無効化と自動失効
+
+ルームの URL は放っておくと永久に使い回せてしまうため、2 つの仕組みで寿命を管理している。
+
+**自動失効(7 日間未アクティブ)**
+
+- ルームは**使い続けている限り残る**。誰かが接続するたび・発言するたびに延命される
+- 最後のアクティビティから **7 日間**誰も使わなかったルームは自動で失効し、以後その URL では誰も参加できない(常設ルームでも、毎週使っていれば失効しない)
+- 日数はサーバ側の設定([server/wrangler.jsonc](server/wrangler.jsonc) の `ROOM_IDLE_TTL_DAYS`)で変更できる
+
+**手動の無効化(作成者のみ)**
+
+- ルームに参加中、メニューの **「このルームを無効化…」** でいつでも閉鎖できる。参加中の全員が即座に切断され、以後その URL では誰も参加できない。**元に戻せない**
+- 無効化できるのは作成者だけ。作成時に発行される管理シークレットが作成者のマシンにだけ保存される(`~/Library/Application Support/ura-talk/admin_secrets.json`。共有 URL には含まれない)ため、URL を知っているだけの参加者には閉鎖できない
+- いったん退出していても、同じマシンで URL から入り直せばシークレットが復元されて無効化メニューが使える
+- メンバーから外したい人がいる場合は、無効化して**新しいルームを作って配り直す**。復号鍵は URL に入っているため回収できないが、無効化すれば中継自体が止まるので、鍵を持っていても以後のコメントは一切届かない
+
+失効・無効化したルームに参加しようとすると、オーバーレイに「⛔ このルームは無効化または期限切れです」と表示される。ルームが生きているかは curl でも確認できる:
+
+```sh
+curl -si --http1.1 \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  https://<server>/r/<token>/ws | head -1
+# 101 = 生きている / 410 = 無効化・失効済み / 404 = 存在しない
+# (--http1.1 必須。HTTP/2 だと Upgrade ヘッダが落ちて常に 426 になる)
+```
 
 ## Slack に記録する(任意)
 
@@ -199,7 +227,7 @@ cd server && npm test                                    # 中継サーバ(vites
 
 - **すべてクライアントで完結**。文字起こし(whisper)・整形(Ollama)はローカル。コメント本文は各クライアントで **AES-GCM 暗号化**してから送る
 - **鍵は共有 URL のフラグメント(`#k=…`)にだけ載る**。フラグメントは HTTP リクエストに含まれないため、**中継サーバ(Cloudflare)には暗号文しか渡らない**(E2E)
-- **サーバはステートレス**。ルーム = Durable Object 1 インスタンスで、最初の接続時に暗黙に作られ、全員が切断してアイドルになると自然消滅する。**何も永続化しない**(`state.storage` に書かない)
+- **サーバは本文を保存しない**。ルーム = Durable Object 1 インスタンスで、storage に置くのは管理メタデータ(管理シークレットのハッシュ・作成/最終アクティブ時刻)だけ。全員が切断してアイドルになると DO はメモリから退避され、7 日未アクティブで失効する(判定は接続時の遅延評価。定期クリーンアップは不要)
 - 自分のコメントも**サーバのエコー経由**で表示するので、全員の画面で同じ順序で流れる。表示は ID で重複排除
 - Slack 記録は E2E のためサーバではできない。**記録役 1 人のクライアント**が復号済みコメントを Slack へ転送する
 
@@ -224,7 +252,7 @@ cd server && npm test                                    # 中継サーバ(vites
 
 ```
 main.go                          サブコマンド(run/dryrun/devices/keys/overlay-demo)・メニューバー常駐・PTT/VAD ループ
-room_ui.go                       ルームのメニュー配線・送受信(作成/参加/退出・URLコピー・表示名・Slack記録の配線)
+room_ui.go                       ルームのメニュー配線・送受信(作成/参加/退出/無効化・URLコピー・表示名・Slack記録の配線)
 internal/config/config.go        設定の読み込み・検証(JSONC)
 internal/recorder/recorder.go    マイク録音 (malgo)。バッファ録音とストリーム録音
 internal/vad/vad.go              音声ストリームを無音で発話単位に区切る(VAD)
@@ -237,6 +265,7 @@ internal/dialog/                 モーダル入力ダイアログ(URL 参加・
 internal/audioout/               既定の音声出力(イヤホン/スピーカー)を判定・監視(voice_input:auto 用)
 internal/voicegate/              音声入力の可否(auto の出力追従・リッスン中の自動停止)を集約
 internal/namestore/              記名ルームの表示名を config とは別の内部ファイルに永続化
+internal/adminstore/             自分が作成したルームの管理シークレット(無効化用)を内部ファイルに永続化
 internal/mirror/                 Slack ミラーの状態機械(親メッセージ→スレッド転送)
 internal/slack/slack.go          Slack 投稿(bot token で chat.postMessage・スレッド投稿)
 internal/modkey/modkey_darwin.go 単体修飾キー・修飾キー2つのコードを CGEventTap で検出(複数キー監視可)

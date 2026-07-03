@@ -3,6 +3,10 @@
   "name": "ura-talk-room",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
+  "vars": {
+    // 未アクティブなルームが失効するまでの日数
+    "ROOM_IDLE_TTL_DAYS": "7"
+  },
   "durable_objects": {
     "bindings": [
       {

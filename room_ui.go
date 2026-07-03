@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mykstmhr/ura-talk/internal/adminstore"
 	"github.com/mykstmhr/ura-talk/internal/config"
 	"github.com/mykstmhr/ura-talk/internal/dialog"
 	"github.com/mykstmhr/ura-talk/internal/inputbar"
@@ -45,6 +46,7 @@ var (
 	mRoomJoin        *systray.MenuItem
 	mRoomCopyURL     *systray.MenuItem
 	mRoomLeave       *systray.MenuItem
+	mRoomRevoke      *systray.MenuItem
 	mRoomName        *systray.MenuItem
 	mSlackMirror     *systray.MenuItem
 )
@@ -61,6 +63,8 @@ func addRoomMenuItems() {
 	mSlackMirror.Hide()
 	mRoomLeave = systray.AddMenuItem("ルームから退出", "ルームとの接続を切る")
 	mRoomLeave.Hide()
+	mRoomRevoke = systray.AddMenuItem("このルームを無効化…", "ルームを閉鎖する(作成者のみ)。全員が切断され、以後この URL では誰も参加できない")
+	mRoomRevoke.Hide()
 
 	systray.AddSeparator()
 
@@ -86,6 +90,12 @@ func setupRoom(cfg *config.Config) {
 	} else {
 		names = namestore.New("")
 	}
+	// 自分が作成したルームの管理シークレット(無効化用)も同じ場所に永続化する。
+	if dir, err := adminstore.DefaultDir(); err == nil {
+		adminSecrets = adminstore.New(dir)
+	} else {
+		adminSecrets = adminstore.New("")
+	}
 	// 表示名を初期化する。config が優先、無ければ前回入力を保存した内部ファイルから。
 	// どちらも空なら記名ルームの作成/参加時に入力を促す(macOS ユーザー名は使わない)。
 	if n := strings.TrimSpace(cfg.Room.DisplayName); n != "" {
@@ -97,6 +107,8 @@ func setupRoom(cfg *config.Config) {
 
 	roomClient.OnMessage = displayComment
 	roomClient.OnState = func(s room.State) { setRoomState(s) }
+	// 無効化・失効で再接続できないときは理由をオーバーレイにも出す(ログだけだと気づけない)。
+	roomClient.OnFatal = func(reason string) { overlay.Show("⛔ "+reason, "#ff6666") }
 
 	// 文字入力バー: 専用ホットキーでトグルし、Enter で音声と同じ経路に流す。
 	inputbar.SetOnSubmit(func(text string) {
@@ -122,6 +134,8 @@ func setupRoom(cfg *config.Config) {
 	mRoomCopyURL.Disable()
 	mRoomLeave.Show()
 	mRoomLeave.Disable()
+	mRoomRevoke.Show()
+	mRoomRevoke.Disable()
 
 	// ルーム作成は中継サーバが要る。room.server 未設定(=参加専用)なら作成メニューは出さない。
 	if strings.TrimSpace(cfg.Room.Server) != "" {
@@ -154,6 +168,11 @@ func setupRoom(cfg *config.Config) {
 			stopMirror() // 退出したら記録も止める
 			roomClient.Leave()
 			log.Println("ルームから退出しました。")
+		}
+	}()
+	go func() {
+		for range mRoomRevoke.ClickedCh {
+			revokeCurrentRoom()
 		}
 	}()
 
@@ -218,6 +237,42 @@ func updateNameMenu(cfg *config.Config) {
 	}
 	mRoomName.SetTitle("表示名を変更… (" + truncRunes(cur, 12) + ")")
 	mRoomName.Enable()
+}
+
+// adminSecrets は自分が作成したルームの管理シークレット(無効化用)の永続化ストア。
+// setupRoom で初期化する。
+var adminSecrets *adminstore.Store
+
+// revokeCurrentRoom は参加中ルームを無効化する(作成者のみ)。確認のうえサーバへ
+// DELETE し、成功したら退出してシークレットを破棄する。
+func revokeCurrentRoom() {
+	r := roomClient.Room()
+	if r == nil {
+		log.Println("⚠️ ルームに参加していません。")
+		return
+	}
+	if r.AdminSecret == "" {
+		log.Println("⚠️ このルームの管理シークレットがありません(無効化できるのは作成者だけです)。")
+		return
+	}
+	_, ok := dialog.Prompt("ルームを無効化",
+		"このルームを閉鎖します。全員が切断され、以後この URL では誰も参加できません(元に戻せません)。",
+		"", "", "無効化")
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := room.Revoke(ctx, r); err != nil {
+		log.Printf("⚠️ %v", err)
+		return
+	}
+	if err := adminSecrets.Delete(r.Token); err != nil {
+		log.Printf("管理シークレットの削除に失敗: %v", err)
+	}
+	stopMirror()
+	roomClient.Leave()
+	log.Println("✅ ルームを無効化しました(以後この URL では誰も参加できません)。")
 }
 
 // copyCurrentRoomURL は参加中ルームの共有 URL をクリップボードへコピーする。
@@ -378,6 +433,14 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 		log.Printf("⚠️ %v", err)
 		return
 	}
+	// 作成者として無効化できるよう、管理シークレットを覚えておく(再起動後も有効)。
+	if r.AdminSecret != "" {
+		if err := adminSecrets.Put(r.Token, adminstore.Entry{
+			Server: r.Server, Secret: r.AdminSecret, CreatedAt: time.Now(),
+		}); err != nil {
+			log.Printf("管理シークレットの保存に失敗(このルームは再起動後に無効化できません): %v", err)
+		}
+	}
 	kind := "匿名"
 	if named {
 		kind = "記名(表示名: " + currentDisplayName() + ")"
@@ -474,6 +537,10 @@ func joinRoomWithDialog(cfg *config.Config) {
 		log.Printf("⚠️ %v", err)
 		return
 	}
+	// 自分が過去に作ったルームなら管理シークレットを復元する(URL には載っていない)。
+	if e, ok := adminSecrets.Get(r.Token); ok {
+		r.AdminSecret = e.Secret
+	}
 	if r.Named {
 		if _, ok := ensureDisplayName(cfg); !ok {
 			log.Println("⚠️ 表示名が未入力のため記名ルームへの参加を中止しました。")
@@ -509,9 +576,12 @@ func setRoomState(s room.State) {
 		}
 	}
 	// URL コピーはルームに属している間は使える。Slack 記録トグルは「記録対象ルーム」でのみ。
-	joined := roomClient.Room() != nil
+	// 無効化は管理シークレットを持つ作成者だけ。
+	r := roomClient.Room()
+	joined := r != nil
 	toggle(mRoomCopyURL, joined)
 	toggle(mSlackMirror, joined && recorded)
+	toggle(mRoomRevoke, joined && r.AdminSecret != "")
 	if !joined {
 		stopMirror() // 切断されたら記録も止める
 	}
