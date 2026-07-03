@@ -48,30 +48,21 @@ func TestStripJSONC(t *testing.T) {
 // TestStripJSONCParses はコメント付き設定が実際に Unmarshal できることを確認する。
 func TestStripJSONCParses(t *testing.T) {
 	in := []byte(`{
-  // 出力先
-  "output": "keystroke",
-  "keystroke": {
-    "send_key": "enter",   // 既定の送信キー
-    "overrides": [
-      { "app": "Slack", "send_key": "enter" }, // チャットは送信
-    ],
+  // 中継サーバ
+  "room": {
+    "server": "https://example.workers.dev", // ルーム中継先
+    "display_name": "",  /* 匿名 */
   },
-  "message_prefix": "🗣 ", /* 接頭辞 */
+  "language": "ja", // 文字起こし言語
 }`)
 	var cfg Config
 	if err := json.Unmarshal(stripJSONC(in), &cfg); err != nil {
 		t.Fatalf("コメント付き設定の Unmarshal に失敗: %v", err)
 	}
-	if cfg.Output != "keystroke" {
-		t.Errorf("output = %q, want keystroke", cfg.Output)
+	if cfg.Room.Server != "https://example.workers.dev" {
+		t.Errorf("room.server = %q", cfg.Room.Server)
 	}
-	if cfg.Keystroke.SendKey != "enter" {
-		t.Errorf("send_key = %q, want enter", cfg.Keystroke.SendKey)
-	}
-	if len(cfg.Keystroke.Overrides) != 1 || cfg.Keystroke.Overrides[0].App != "Slack" {
-		t.Errorf("overrides = %+v, want 1件(Slack)", cfg.Keystroke.Overrides)
-	}
-	if cfg.MessagePrefix != "🗣 " {
-		t.Errorf("message_prefix = %q", cfg.MessagePrefix)
+	if cfg.Language != "ja" {
+		t.Errorf("language = %q, want ja", cfg.Language)
 	}
 }
