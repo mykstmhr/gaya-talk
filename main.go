@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,6 +34,7 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/keystroke"
 	"github.com/mykstmhr/ura-talk/internal/modkey"
 	"github.com/mykstmhr/ura-talk/internal/oauth"
+	"github.com/mykstmhr/ura-talk/internal/overlay"
 	"github.com/mykstmhr/ura-talk/internal/recorder"
 	"github.com/mykstmhr/ura-talk/internal/slack"
 	"github.com/mykstmhr/ura-talk/internal/tokenstore"
@@ -94,8 +96,10 @@ func main() {
 		runDevices()
 	case "keys":
 		runKeys()
+	case "overlay-demo":
+		runOverlayDemo()
 	default:
-		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [login|logout|run|dryrun|devices|keys]\n", cmd)
+		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [login|logout|run|dryrun|devices|keys|overlay-demo]\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -164,6 +168,39 @@ func runKeys() {
 	fmt.Println(`  例: "hotkey": { "mods": [], "key": "rightcmd" }`)
 	fmt.Println()
 	fmt.Println("変更後はアプリを再起動してください(.app はメニューバー→終了→再 open)。")
+}
+
+// runOverlayDemo は room 機能を使わずにオーバーレイの見た目だけ確認する。
+// サンプルコメントをランダム間隔で流し続ける(メニューバーの「終了」で止める)。
+func runOverlayDemo() {
+	systray.Run(func() {
+		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
+		systray.SetTooltip("ura-talk overlay demo")
+		mQuit := systray.AddMenuItem("終了", "デモを終了する")
+		go func() {
+			<-mQuit.ClickedCh
+			systray.Quit()
+		}()
+
+		overlay.Start()
+		go func() {
+			samples := []struct{ text, color string }{
+				{"それな", "#ffffff"},
+				{"wwww", "#ffcc00"},
+				{"たしかに", "#66ccff"},
+				{"この案よさそう", "#99ff99"},
+				{"あとで聞いてみよう", "#ff9999"},
+				{"888888", "#ffffff"},
+				{"ちょっと待って、それ先週決まったやつでは？", "#cc99ff"},
+				{"賛成です", "#66ffcc"},
+			}
+			for i := 0; ; i++ {
+				s := samples[i%len(samples)]
+				overlay.Show(s.text, s.color)
+				time.Sleep(time.Duration(600+rand.IntN(1400)) * time.Millisecond)
+			}
+		}()
+	}, func() { os.Exit(0) })
 }
 
 // runLogout は保存済みトークンを削除する。
