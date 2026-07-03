@@ -14,8 +14,8 @@ jobs:
   dist:
     runs-on: macos-latest # Apple Silicon(このアプリの動作要件と同じ)
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
       - name: サーバのテスト
@@ -25,7 +25,7 @@ jobs:
       - name: 配布用 zip を作成
         run: make dist
       - name: Release を作成して zip を添付
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: dist/ura-talk.app.zip
           generate_release_notes: true

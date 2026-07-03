@@ -14,10 +14,10 @@ jobs:
     # cgo(CoreGraphics / AppKit 等)を使うため macOS ランナーで動かす。
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           # go.mod の go ディレクティブ(1.26.4 以上)に追随させる。
           go-version-file: go.mod
@@ -36,10 +36,10 @@ jobs:
     # 依存(標準ライブラリ含む)の既知脆弱性を継続的にチェックする。
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
           check-latest: true
