@@ -59,6 +59,8 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 どちらも whisper→ローカル LLM 整形を通ってからオーバーレイに流れる(整形は任意)。
 
+> **文字だけで使う**: スピーカーで会議音声を流していると内蔵マイクが相手の声も拾ってしまう(macOS のエコーキャンセルは各アプリ個別で、ura-talk の録音には効かない)。イヤホンを使わない・音声入力が要らない場合は `voice_input: false` にすると、マイク・whisper を一切使わず文字入力バー(`右⌘`)だけで動く。
+
 ### メンバーと共有する(ルーム)
 
 1. ホストがメニューバー →「**新規ルームを作成して URL をコピー**」。共有 URL がクリップボードに入る
@@ -139,6 +141,7 @@ npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.
 | `room.server` | 中継サーバ URL(`server/` のデプロイ先)。空ならソロモード | `""` |
 | `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式。コードも可) | `rightcmd` |
 | `room.display_name` | 記名モードのルームで名乗る表示名(空なら匿名) | `""` |
+| `voice_input` | 音声入力を使うか。`false` で文字入力バーのみ(マイク/whisper 不要) | `true` |
 | `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |
 | `hotkey` | 音声リッスンのホットキー(単体修飾キー / mods+key / コード) | `rightshift+rightcmd` |
 | `whisper_bin` | whisper-cli の実行パス | `whisper-cli` |

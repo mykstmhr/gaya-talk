@@ -433,6 +433,16 @@ func serve(dryRun bool) {
 		setupRoom(cfg)
 	}
 
+	// 音声入力が無効なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く
+	// (スピーカー音の混入や本線発話の二重取り込みを避けたいときの割り切りモード)。
+	if !cfg.VoiceInput {
+		log.Println("ℹ️ 音声入力は無効です(文字入力バーのみ)。")
+		setInfo(mInfoMode, "方式 : 文字入力のみ")
+		setInfo(mInfoKey, "入力バー : "+cfg.Room.InputHotkey.String())
+		tray.setBase(iconIdle, "待機中(文字入力のみ)…")
+		return
+	}
+
 	// 送り先(sink)を決める。dryRun は送らず表示のみ(out.send == nil)。
 	out := buildSink(cfg, dryRun)
 

@@ -16,6 +16,11 @@ type Config struct {
 	// room(オーバーレイ共有)の設定。
 	Room RoomConfig `json:"room"`
 
+	// VoiceInput は音声入力(マイク→文字起こし)を使うか。false なら文字入力バー
+	// (room.input_hotkey)だけになり、マイク・whisper・Ollama を一切使わない。
+	// スピーカーで会議音声を流していて他人の声を拾いたくない等の場合に無効化する。
+	VoiceInput bool `json:"voice_input"`
+
 	// whisper-cli の実行パス(PATH 上にあれば "whisper-cli" のままで良い)。
 	WhisperBin string `json:"whisper_bin"`
 	// ggml モデルファイルのパス。
@@ -120,6 +125,7 @@ func (h Hotkey) String() string {
 // ~/.config/ura-talk/config.json。見つからない項目はデフォルトを使う。
 func Load() (*Config, error) {
 	cfg := &Config{
+		VoiceInput:      true,
 		WhisperBin:      "whisper-cli",
 		Language:        "ja",
 		MinDurationMs:   300,
