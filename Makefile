@@ -1,4 +1,4 @@
-.PHONY: help build clean setup setup-voice app app-open dist model whisper-model enhance-model restart logs
+.PHONY: help build clean setup setup-voice app app-open dist model whisper-model enhance-model restart logs deploy
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -163,6 +163,16 @@ enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config
 	  echo "⚠️ $(CONFIG) が無いので enhance.model は手動設定してください(値: $$m)"; \
 	fi; \
 	echo "反映するには: make restart"
+
+# 中継サーバ(server/)を Cloudflare にデプロイする。壊れたサーバを上げないよう
+# テストを通してから deploy する。初回は `cd server && npx wrangler login` が必要。
+# 注意: ルームのライフサイクル変更を含むデプロイでは、既存ルームの URL が無効になる
+# ことがある(デプロイ後に作り直して配り直す)。
+deploy: ## 中継サーバを Cloudflare にデプロイ(テスト → wrangler deploy)
+	@cd server && { [ -d node_modules ] || npm install; }
+	@cd server && npm test
+	@cd server && npx wrangler deploy
+	@echo "✅ デプロイしました。config の room.server が上の URL と一致しているか確認してください。"
 
 clean: ## ビルド成果物を削除する
 	rm -rf bin $(APP)
