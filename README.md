@@ -59,7 +59,7 @@ make app-open              # .app をビルドして起動。初回はマイク/
 
 どちらも whisper→ローカル LLM 整形を通ってからオーバーレイに流れる(整形は任意)。
 
-> **文字だけで使う**: スピーカーで会議音声を流していると内蔵マイクが相手の声も拾ってしまう(macOS のエコーキャンセルは各アプリ個別で、ura-talk の録音には効かない)。イヤホンを使わない・音声入力が要らない場合は `voice_input: false` にすると、マイク・whisper を一切使わず文字入力バー(`右⌘`)だけで動く。
+> **音声入力の自動オフ(`voice_input`)**: スピーカーで会議音声を流していると内蔵マイクが相手の声も拾ってしまう(macOS のエコーキャンセルは各アプリ個別で、ura-talk の録音には効かない)。そこで既定の **`"auto"`** では、**出力がスピーカー(内蔵・HDMI 等)のときは音声入力を自動でオフ**にし、**イヤホン/ヘッドホン(Bluetooth・USB・ヘッドホン端子)のときはオン**にする。イヤホンを抜き差しすると自動で切り替わる(再起動不要)。常に音声を使うなら `"on"`、文字入力バー(`右⌘`)だけで使う(マイク/whisper 不要)なら `"off"`。
 
 ### メンバーと共有する(ルーム)
 
@@ -141,7 +141,7 @@ npx wrangler deploy   # 出力される https://ura-talk-room.<account>.workers.
 | `room.server` | 中継サーバ URL(`server/` のデプロイ先)。空ならソロモード | `""` |
 | `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式。コードも可) | `rightcmd` |
 | `room.display_name` | 記名モードのルームで名乗る表示名(空なら匿名) | `""` |
-| `voice_input` | 音声入力を使うか。`false` で文字入力バーのみ(マイク/whisper 不要) | `true` |
+| `voice_input` | 音声入力の可否。`auto`(出力がイヤホンならオン/スピーカーなら自動オフ) / `on` / `off`(文字のみ・マイク不要)。旧 `true`/`false` も可 | `auto` |
 | `listen_mode` | 入力方式。`ptt`(押下中録音) / `vad`(トグルして自動区切り) | `ptt` |
 | `hotkey` | 音声リッスンのホットキー(単体修飾キー / mods+key / コード) | `rightshift+rightcmd` |
 | `whisper_bin` | whisper-cli の実行パス | `whisper-cli` |
@@ -194,6 +194,7 @@ internal/room/                   ルーム: 共有 URL・E2E 暗号化(AES-GCM)�
 internal/overlay/                ニコニコ風オーバーレイ(透過・クリック貫通・全モニター・画面共有に映らない)
 internal/inputbar/               Spotlight 風の文字入力バー(非アクティブ化パネル)
 internal/dialog/                 モーダル入力ダイアログ(URL 参加用)
+internal/audioout/                既定の音声出力(イヤホン/スピーカー)を判定・監視(voice_input:auto 用)
 internal/modkey/modkey_darwin.go 単体修飾キー・修飾キー2つのコードを CGEventTap で検出(複数キー監視可)
 internal/trayicon/trayicon.go    メニューバーのアイコン(待機/聞き取り=オレンジ/録音/文字起こし)
 server/                          ルームの中継サーバ(Cloudflare Workers + Durable Objects)

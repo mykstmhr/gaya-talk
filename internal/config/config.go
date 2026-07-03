@@ -16,10 +16,11 @@ type Config struct {
 	// room(オーバーレイ共有)の設定。
 	Room RoomConfig `json:"room"`
 
-	// VoiceInput は音声入力(マイク→文字起こし)を使うか。false なら文字入力バー
-	// (room.input_hotkey)だけになり、マイク・whisper・Ollama を一切使わない。
-	// スピーカーで会議音声を流していて他人の声を拾いたくない等の場合に無効化する。
-	VoiceInput bool `json:"voice_input"`
+	// VoiceInput は音声入力(マイク→文字起こし)の使用可否。
+	// "auto"(既定): 出力がスピーカー等のときは自動でオフ、イヤホン等のときはオン。
+	// "on": 常に有効 / "off": 常に無効(文字入力バーのみ・マイク/whisper 不要)。
+	// 旧来の true/false もそれぞれ on/off として受け付ける。
+	VoiceInput VoiceMode `json:"voice_input"`
 
 	// whisper-cli の実行パス(PATH 上にあれば "whisper-cli" のままで良い)。
 	WhisperBin string `json:"whisper_bin"`
@@ -54,6 +55,40 @@ type Config struct {
 	Sound SoundConfig `json:"sound"`
 	// この長さ未満の録音は無視する(ptt の誤爆防止)。
 	MinDurationMs int `json:"min_duration_ms"`
+}
+
+// VoiceMode は音声入力の使用可否("auto" / "on" / "off")。
+type VoiceMode string
+
+const (
+	VoiceAuto VoiceMode = "auto"
+	VoiceOn   VoiceMode = "on"
+	VoiceOff  VoiceMode = "off"
+)
+
+// UnmarshalJSON は "auto"/"on"/"off" に加え、旧来の bool(true/false)も受け付ける。
+func (m *VoiceMode) UnmarshalJSON(b []byte) error {
+	switch strings.TrimSpace(string(b)) {
+	case "true":
+		*m = VoiceOn
+		return nil
+	case "false":
+		*m = VoiceOff
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	switch v := VoiceMode(strings.ToLower(strings.TrimSpace(s))); v {
+	case VoiceAuto, VoiceOn, VoiceOff:
+		*m = v
+	case "":
+		*m = VoiceAuto
+	default:
+		return fmt.Errorf("voice_input は auto/on/off のいずれかです(現在: %q)", s)
+	}
+	return nil
 }
 
 // RoomConfig は room(ニコニコ風オーバーレイ共有)の設定。
@@ -125,7 +160,7 @@ func (h Hotkey) String() string {
 // ~/.config/ura-talk/config.json。見つからない項目はデフォルトを使う。
 func Load() (*Config, error) {
 	cfg := &Config{
-		VoiceInput:      true,
+		VoiceInput:      VoiceAuto,
 		WhisperBin:      "whisper-cli",
 		Language:        "ja",
 		MinDurationMs:   300,

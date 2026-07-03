@@ -25,9 +25,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/mykstmhr/ura-talk/internal/audioout"
 	"github.com/mykstmhr/ura-talk/internal/config"
 	"github.com/mykstmhr/ura-talk/internal/enhance"
 	"github.com/mykstmhr/ura-talk/internal/modkey"
@@ -433,14 +435,22 @@ func serve(dryRun bool) {
 		setupRoom(cfg)
 	}
 
-	// 音声入力が無効なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く
-	// (スピーカー音の混入や本線発話の二重取り込みを避けたいときの割り切りモード)。
-	if !cfg.VoiceInput {
+	// voice_input が "off" なら、マイク・whisper・Ollama を一切使わず文字入力バーだけで動く。
+	if cfg.VoiceInput == config.VoiceOff {
 		log.Println("ℹ️ 音声入力は無効です(文字入力バーのみ)。")
 		setInfo(mInfoMode, "方式 : 文字入力のみ")
 		setInfo(mInfoKey, "入力バー : "+cfg.Room.InputHotkey.String())
 		tray.setBase(iconIdle, "待機中(文字入力のみ)…")
 		return
+	}
+
+	// "auto" は出力デバイスで音声入力の可否を決める(スピーカー出力中は相手の声を
+	// 拾わないよう自動オフ)。"on" は常に許可。出力の抜き差しに追従する。
+	if cfg.VoiceInput == config.VoiceAuto {
+		voiceAllowed.Store(audioout.Private())
+		audioout.Watch(func() { applyVoiceAuto(cfg) })
+	} else {
+		voiceAllowed.Store(true)
 	}
 
 	// 送り先(sink)を決める。dryRun は送らず表示のみ(out.send == nil)。
@@ -515,19 +525,64 @@ func serve(dryRun bool) {
 
 	// 状態の下に動作情報を常時表示(方式/キー)。全角キーで幅を揃える。
 	setInfo(mInfoKey, "キー : "+cfg.Hotkey.String())
+	updateModeInfo(cfg)
+	if cfg.VoiceInput == config.VoiceAuto {
+		if voiceAllowed.Load() {
+			log.Println("🎧 イヤホン出力を検出 → 音声入力は有効です(スピーカーに切り替えると自動オフ)。")
+		} else {
+			log.Println("🔈 スピーカー出力を検出 → 音声入力は自動オフ中です(イヤホンにすると自動オン)。")
+		}
+	}
 
 	if cfg.ListenMode == "vad" {
 		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Hotkey)
-		setInfo(mInfoMode, "方式 : VAD(自動区切り)")
 		tray.setBase(iconIdle, "待機中…")
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
 	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Hotkey)
-	setInfo(mInfoMode, "方式 : PTT(押している間だけ)")
 	tray.setBase(iconIdle, "待機中…")
 	pttLoop(rec, wh, out, cfg, down, up)
+}
+
+// voiceAllowed は音声入力を今受け付けてよいか(auto では出力デバイスに追従)。
+// voiceRevoke は「リッスン中に出力がスピーカーへ変わった」ことを VAD ループへ伝える。
+var (
+	voiceAllowed atomic.Bool
+	voiceRevoke  = make(chan struct{}, 1)
+)
+
+// applyVoiceAuto は出力構成の変化に応じて音声入力の可否を切り替える(auto 時のみ)。
+// audioout の監視コールバックから呼ばれる。
+func applyVoiceAuto(cfg *config.Config) {
+	priv := audioout.Private()
+	if priv == voiceAllowed.Swap(priv) {
+		return // 変化なし
+	}
+	if priv {
+		log.Println("🎧 イヤホン出力を検出 → 音声入力を有効化しました。")
+	} else {
+		log.Println("🔈 スピーカー出力を検出 → 音声入力を無効化しました(相手の声をオーバーレイに拾わないため)。")
+		select {
+		case voiceRevoke <- struct{}{}: // リッスン中なら停止させる
+		default:
+		}
+	}
+	updateModeInfo(cfg)
+}
+
+// updateModeInfo は動作情報行(方式)を現在の状態に合わせて更新する。
+func updateModeInfo(cfg *config.Config) {
+	if cfg.VoiceInput == config.VoiceAuto && !voiceAllowed.Load() {
+		setInfo(mInfoMode, "方式 : 音声オフ(スピーカー出力中)")
+		return
+	}
+	if cfg.ListenMode == "vad" {
+		setInfo(mInfoMode, "方式 : VAD(自動区切り)")
+	} else {
+		setInfo(mInfoMode, "方式 : PTT(押している間だけ)")
+	}
 }
 
 // buildTrigger はホットキーを設定から組み立て、押下(down)/解放(up)を流すチャネルを返す。
@@ -628,6 +683,10 @@ func playSound(name string) {
 func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down, up <-chan struct{}) {
 	for {
 		<-down
+		if !voiceAllowed.Load() {
+			log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
+			continue
+		}
 		if err := rec.Start(); err != nil {
 			log.Printf("録音開始失敗: %v", err)
 			continue
@@ -682,9 +741,24 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	}
 
 	listening := false
+	stop := func() {
+		rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
+		seg.Flush()
+		listening = false
+		tray.setBase(iconIdle, "待機中…")
+		playOff(cfg)
+	}
 	for {
 		if !listening {
+			select { // リッスンしていない間に来た revoke は捨てる
+			case <-voiceRevoke:
+			default:
+			}
 			<-down
+			if !voiceAllowed.Load() {
+				log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
+				continue
+			}
 			if err := rec.StartStream(seg.Feed); err != nil {
 				log.Printf("リッスン開始失敗: %v", err)
 				continue
@@ -695,13 +769,14 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			playOn(cfg)
 			continue
 		}
-		<-down // 手動でトグル停止
-		log.Println("■ リッスン停止")
-		rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
-		seg.Flush()
-		listening = false
-		tray.setBase(iconIdle, "待機中…")
-		playOff(cfg)
+		select {
+		case <-down: // 手動でトグル停止
+			log.Println("■ リッスン停止")
+			stop()
+		case <-voiceRevoke: // リッスン中に出力がスピーカーへ変わった → 自動停止
+			log.Println("🔈 出力がスピーカーに変わったため音声入力を停止しました。")
+			stop()
+		}
 	}
 }
 
