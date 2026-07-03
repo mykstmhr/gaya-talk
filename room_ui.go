@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"sync"
 	"time"
@@ -38,11 +39,12 @@ var commentPalette = []string{
 
 // room 用メニュー項目(onReady で作成し、room 出力のときだけ表示)。
 var (
-	mRoomState   *systray.MenuItem
-	mRoomCreate  *systray.MenuItem
-	mRoomJoin    *systray.MenuItem
-	mRoomCopyURL *systray.MenuItem
-	mRoomLeave   *systray.MenuItem
+	mRoomState       *systray.MenuItem
+	mRoomCreateAnon  *systray.MenuItem
+	mRoomCreateNamed *systray.MenuItem
+	mRoomJoin        *systray.MenuItem
+	mRoomCopyURL     *systray.MenuItem
+	mRoomLeave       *systray.MenuItem
 )
 
 // addRoomMenuItems はメニュー項目を(隠したまま)作る。onReady から呼ぶ。
@@ -60,8 +62,10 @@ func addRoomMenuItems() {
 
 	mRoomJoin = systray.AddMenuItem("ルームに URL で参加…", "共有 URL を入力してルームに参加する(コピー済みなら自動で入る)")
 	mRoomJoin.Hide()
-	mRoomCreate = systray.AddMenuItem("新規ルームを作成して URL をコピー", "中継サーバにルームを作り、共有 URL をクリップボードへ")
-	mRoomCreate.Hide()
+	mRoomCreateAnon = systray.AddMenuItem("新規ルームを作成 — 匿名", "匿名ルームを作り、共有 URL をクリップボードへ(名前は出ない)")
+	mRoomCreateAnon.Hide()
+	mRoomCreateNamed = systray.AddMenuItem("新規ルームを作成 — 記名", "記名ルームを作り、共有 URL をクリップボードへ(各自の表示名が付く)")
+	mRoomCreateNamed.Hide()
 }
 
 // setupRoom は room 出力の初期化: オーバーレイ・入力バー・メニューの配線。serve から一度だけ呼ぶ。
@@ -91,7 +95,8 @@ func setupRoom(cfg *config.Config) {
 	}
 
 	mRoomState.Show()
-	mRoomCreate.Show()
+	mRoomCreateAnon.Show()
+	mRoomCreateNamed.Show()
 	mRoomJoin.Show()
 	mRoomCopyURL.Show()
 	mRoomCopyURL.Disable()
@@ -99,13 +104,18 @@ func setupRoom(cfg *config.Config) {
 	mRoomLeave.Disable()
 
 	go func() {
-		for range mRoomCreate.ClickedCh {
-			createAndJoinRoom(cfg)
+		for range mRoomCreateAnon.ClickedCh {
+			createAndJoinRoom(cfg, false)
+		}
+	}()
+	go func() {
+		for range mRoomCreateNamed.ClickedCh {
+			createAndJoinRoom(cfg, true)
 		}
 	}()
 	go func() {
 		for range mRoomJoin.ClickedCh {
-			joinRoomWithDialog()
+			joinRoomWithDialog(cfg)
 		}
 	}()
 	go func() {
@@ -140,7 +150,7 @@ func copyCurrentRoomURL() {
 func sendRoomComment(cfg *config.Config, text string) error {
 	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor}
 	if r := roomClient.Room(); r != nil && r.Named {
-		p.Name = cfg.Room.DisplayName // 空なら記名ルームでも匿名のまま
+		p.Name = resolvedDisplayName(cfg)
 	}
 	if err := roomClient.Send(p); err != nil {
 		// 送信エラーでも実際には届いていることがある(タイムアウト等)。
@@ -185,31 +195,48 @@ func displayComment(p room.Payload) {
 }
 
 // createAndJoinRoom はルームを作成して共有 URL をコピーし、自分も参加する。
-func createAndJoinRoom(cfg *config.Config) {
+// named=true なら記名ルーム(URL に &n=1。各参加者の表示名が付く)。
+func createAndJoinRoom(cfg *config.Config, named bool) {
 	if cfg.Room.Server == "" {
 		log.Println("⚠️ room.server が未設定です(config.json に中継サーバの URL を設定してください)")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	r, err := room.Create(ctx, cfg.Room.Server, false)
+	r, err := room.Create(ctx, cfg.Room.Server, named)
 	if err != nil {
 		log.Printf("⚠️ %v", err)
 		return
+	}
+	kind := "匿名"
+	if named {
+		kind = "記名(表示名: " + resolvedDisplayName(cfg) + ")"
 	}
 	if err := pbcopy(r.URL()); err != nil {
 		// コピーできなくても URL は必要なのでログに出す(鍵入りだが自分のログなので許容)。
 		log.Printf("⚠️ クリップボードへコピーできませんでした。URL: %s", r.URL())
 	} else {
-		log.Println("✅ ルームを作成し、共有 URL をクリップボードへコピーしました。メンバーに共有してください。")
+		log.Printf("✅ %sルームを作成し、共有 URL をクリップボードへコピーしました。メンバーに共有してください。", kind)
 	}
 	roomClient.Join(r)
+}
+
+// resolvedDisplayName は記名ルームで名乗る表示名を決める。
+// config の display_name が空なら macOS のユーザー名にフォールバックする。
+func resolvedDisplayName(cfg *config.Config) string {
+	if n := strings.TrimSpace(cfg.Room.DisplayName); n != "" {
+		return n
+	}
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return "匿名"
 }
 
 // joinRoomWithDialog は共有 URL の入力ダイアログを出して参加する。
 // クリップボードに有効な共有 URL があればプリフィルするので、コピー済みなら
 // そのまま Enter するだけでよい。
-func joinRoomWithDialog() {
+func joinRoomWithDialog(cfg *config.Config) {
 	initial := ""
 	if raw, err := pbpaste(); err == nil {
 		if _, err := room.Parse(raw); err == nil {
@@ -227,6 +254,9 @@ func joinRoomWithDialog() {
 		log.Printf("⚠️ %v", err)
 		return
 	}
+	if r.Named {
+		log.Printf("ℹ️ 記名ルームに参加します(あなたの表示名: %s)。", resolvedDisplayName(cfg))
+	}
 	roomClient.Join(r)
 }
 
@@ -238,7 +268,11 @@ func setRoomState(s room.State) {
 	}
 	id := ""
 	if r := roomClient.Room(); r != nil {
-		id = " (" + truncRunes(r.Token, 8) + ")"
+		tag := "匿名"
+		if r.Named {
+			tag = "記名"
+		}
+		id = " (" + truncRunes(r.Token, 8) + " / " + tag + ")"
 	}
 	// URL コピーは接続中でなくても、ルームに属している間(接続試行中含む)は使える。
 	joined := roomClient.Room() != nil
