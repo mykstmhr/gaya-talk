@@ -23,7 +23,31 @@ char* dialogPrompt(const char *title, const char *message, const char *placehold
 
         // 常駐(accessory)アプリはそのままだとモーダルが背面に出るので前面化する。
         [NSApp activateIgnoringOtherApps:YES];
-        if ([alert runModal] == NSAlertFirstButtonReturn) {
+
+        // メニューバー常駐アプリには標準の「編集」メニューが無く、Cmd+V などの
+        // 編集ショートカットがルーティングされない(貼り付けができない)。
+        // モーダル中だけキーイベントを監視し、Cmd+V/C/X/A を first responder
+        // (テキスト欄のフィールドエディタ)へ直接転送する。
+        id monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+            handler:^NSEvent *(NSEvent *e) {
+                if ((e.modifierFlags & NSEventModifierFlagCommand) &&
+                    !(e.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagOption))) {
+                    NSString *k = e.charactersIgnoringModifiers.lowercaseString;
+                    SEL sel = NULL;
+                    if ([k isEqualToString:@"v"]) sel = @selector(paste:);
+                    else if ([k isEqualToString:@"c"]) sel = @selector(copy:);
+                    else if ([k isEqualToString:@"x"]) sel = @selector(cut:);
+                    else if ([k isEqualToString:@"a"]) sel = @selector(selectAll:);
+                    if (sel && [alert.window.firstResponder tryToPerform:sel with:nil]) {
+                        return nil; // 消費(二重入力を防ぐ)
+                    }
+                }
+                return e;
+            }];
+
+        NSModalResponse resp = [alert runModal];
+        [NSEvent removeMonitor:monitor];
+        if (resp == NSAlertFirstButtonReturn) {
             const char *s = [input.stringValue UTF8String];
             if (s) result = strdup(s);
         }
