@@ -45,6 +45,7 @@ var (
 	mRoomJoin        *systray.MenuItem
 	mRoomCopyURL     *systray.MenuItem
 	mRoomLeave       *systray.MenuItem
+	mRoomName        *systray.MenuItem
 )
 
 // addRoomMenuItems はメニュー項目を(隠したまま)作る。onReady から呼ぶ。
@@ -66,6 +67,11 @@ func addRoomMenuItems() {
 	mRoomCreateAnon.Hide()
 	mRoomCreateNamed = systray.AddMenuItem("新規ルームを作成 — 記名", "記名ルームを作り、共有 URL をクリップボードへ(各自の表示名が付く)")
 	mRoomCreateNamed.Hide()
+
+	systray.AddSeparator()
+
+	mRoomName = systray.AddMenuItem("表示名を変更…", "記名ルームで名乗る表示名を変更する")
+	mRoomName.Hide()
 }
 
 // setupRoom は room 出力の初期化: オーバーレイ・入力バー・メニューの配線。serve から一度だけ呼ぶ。
@@ -136,6 +142,55 @@ func setupRoom(cfg *config.Config) {
 			log.Println("ルームから退出しました。")
 		}
 	}()
+
+	mRoomName.Show()
+	updateNameMenu(cfg)
+	go func() {
+		for range mRoomName.ClickedCh {
+			changeDisplayName(cfg)
+		}
+	}()
+}
+
+// changeDisplayName は表示名の変更ダイアログを出し、内部ファイルに保存する。
+// config の display_name が設定されている場合はそちらが優先なので何もしない。
+func changeDisplayName(cfg *config.Config) {
+	if strings.TrimSpace(cfg.Room.DisplayName) != "" {
+		log.Println("ℹ️ 表示名は config の display_name で設定されているため、メニューからは変更できません。")
+		return
+	}
+	entered, ok := dialog.Prompt("表示名を変更",
+		"記名ルームで各コメントの先頭に付く名前です。",
+		"例: myk", currentDisplayName(), "保存")
+	if !ok {
+		return
+	}
+	n := strings.TrimSpace(entered)
+	if n == "" {
+		return // 空は変更なし扱い(誤って消さないため)
+	}
+	setDisplayName(n)
+	saveStoredName(n)
+	updateNameMenu(cfg)
+	log.Printf("✅ 表示名を「%s」に変更しました。", n)
+}
+
+// updateNameMenu は「表示名を変更」項目のラベルと有効/無効を現状に合わせる。
+func updateNameMenu(cfg *config.Config) {
+	if mRoomName == nil {
+		return
+	}
+	if strings.TrimSpace(cfg.Room.DisplayName) != "" {
+		mRoomName.SetTitle("表示名 : " + cfg.Room.DisplayName + "(config)")
+		mRoomName.Disable()
+		return
+	}
+	cur := currentDisplayName()
+	if cur == "" {
+		cur = "未設定"
+	}
+	mRoomName.SetTitle("表示名を変更… (" + truncRunes(cur, 12) + ")")
+	mRoomName.Enable()
 }
 
 // copyCurrentRoomURL は参加中ルームの共有 URL をクリップボードへコピーする。
@@ -278,6 +333,7 @@ func ensureDisplayName(cfg *config.Config) (string, bool) {
 	}
 	setDisplayName(n)
 	saveStoredName(n) // 次回以降は聞かない(config とは別の内部ファイル)
+	updateNameMenu(cfg)
 	return n, true
 }
 
