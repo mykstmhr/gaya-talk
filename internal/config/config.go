@@ -53,6 +53,9 @@ type Config struct {
 	Hotkey Hotkey `json:"hotkey"`
 	// 有効化/無効化時に鳴らす効果音。
 	Sound SoundConfig `json:"sound"`
+	// リッスン/録音中に画面下部へ小さな状態バー(音量メーター付き)を出すか。
+	// バーは画面共有には映らず、クリックは下のアプリへ素通しする。
+	VoiceBar bool `json:"voice_bar"`
 	// この長さ未満の録音は無視する(ptt の誤爆防止)。
 	MinDurationMs int `json:"min_duration_ms"`
 }
@@ -179,6 +182,7 @@ func Load() (*Config, error) {
 		Hotkey:          Hotkey{Mods: nil, Key: "rightcmd"},
 		Room:            RoomConfig{InputHotkey: Hotkey{Mods: []string{"rightshift"}, Key: "rightcmd"}},
 		Sound:           SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
+		VoiceBar:        true,
 		VAD: VADConfig{
 			Threshold:    0.01,
 			MinSpeechMs:  300,

@@ -156,6 +156,11 @@ func (s *Segmenter) reset() {
 	s.lastVoicedLen = 0
 }
 
+// RMS は PCM(S16LE)の音量を 0..1 で返す。UI のレベル表示など外部の用途向け。
+func RMS(pcm []byte) float64 {
+	return rmsNorm(pcm)
+}
+
 // rmsNorm は PCM(S16LE)の RMS を 0..1 に正規化して返す。
 func rmsNorm(pcm []byte) float64 {
 	n := len(pcm) / 2

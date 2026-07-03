@@ -31,12 +31,14 @@ import (
 	"github.com/mykstmhr/ura-talk/internal/audioout"
 	"github.com/mykstmhr/ura-talk/internal/config"
 	"github.com/mykstmhr/ura-talk/internal/enhance"
+	"github.com/mykstmhr/ura-talk/internal/inputbar"
 	"github.com/mykstmhr/ura-talk/internal/modkey"
 	"github.com/mykstmhr/ura-talk/internal/overlay"
 	"github.com/mykstmhr/ura-talk/internal/recorder"
 	"github.com/mykstmhr/ura-talk/internal/transcribe"
 	"github.com/mykstmhr/ura-talk/internal/trayicon"
 	"github.com/mykstmhr/ura-talk/internal/vad"
+	"github.com/mykstmhr/ura-talk/internal/voicebar"
 	"github.com/mykstmhr/ura-talk/internal/voicegate"
 
 	"fyne.io/systray"
@@ -246,14 +248,13 @@ func onReady(dryRun bool) func() {
 	}
 }
 
-// iconState はメニューバーに出す状態アイコンの種別。
+// iconState は音声入力の基本状態(メニューバーとバーの表示のもとになる)。
 type iconState int
 
 const (
-	iconIdle       iconState = iota // 待機(一時停止)
-	iconListen                      // リッスン中(マイク)
-	iconRec                         // 録音/音声検出中(赤・点滅)
-	iconTranscribe                  // 文字起こし中(吹き出し)
+	iconIdle   iconState = iota // 待機
+	iconListen                  // リッスン中(無音待ち)
+	iconRec                     // 録音/音声検出中
 )
 
 // truncRunes は表示が長くなりすぎないよう name を max 文字に丸める(超過分は …)。
@@ -283,120 +284,108 @@ func setInfo(item *systray.MenuItem, text string) {
 	item.Show()
 }
 
-// setState は状態アイコンとドロップダウンの状態テキストを更新する。
-func setState(state iconState, text string) {
-	applyIcon(state)
-	if mStatus != nil {
-		mStatus.SetTitle(text)
-	}
-}
-
-// applyIcon は状態に応じてメニューバーアイコンを差し替える。録音中だけ赤の点滅にする。
-func applyIcon(state iconState) {
-	if state == iconRec {
-		startBlink()
-		return
-	}
-	stopBlink()
-	switch state {
-	case iconListen:
-		// リッスン中は黄色(カラー=非テンプレート)で目立たせる。待機時は Idle の黒テンプレートに戻る。
-		systray.SetIcon(trayicon.ListenOn)
-	case iconTranscribe:
-		systray.SetTemplateIcon(trayicon.Transcribe, trayicon.Transcribe)
-	default: // iconIdle
-		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
-	}
-}
-
-// blink は録音中の赤丸点滅(● ⇄ ○)を制御する goroutine のスイッチ。
-var (
-	blinkMu   sync.Mutex
-	blinkStop chan struct{}
-)
-
-// startBlink は録音中の点滅を開始する(多重起動しない)。rec はカラーなので SetIcon を使う。
-func startBlink() {
-	blinkMu.Lock()
-	defer blinkMu.Unlock()
-	if blinkStop != nil {
-		return
-	}
-	stop := make(chan struct{})
-	blinkStop = stop
-	systray.SetIcon(trayicon.Rec) // まず点灯
-	go func() {
-		on := true
-		t := time.NewTicker(500 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				on = !on
-				if on {
-					systray.SetIcon(trayicon.Rec)
-				} else {
-					systray.SetIcon(trayicon.RecRing)
-				}
-			}
-		}
-	}()
-}
-
-// stopBlink は点滅を止める。
-func stopBlink() {
-	blinkMu.Lock()
-	defer blinkMu.Unlock()
-	if blinkStop != nil {
-		close(blinkStop)
-		blinkStop = nil
-	}
-}
-
-// tray は「基本状態(待機/リッスン/録音)」と、それに重ねる「文字起こし中」表示を管理する。
-// 文字起こしは別 goroutine で並行しうるので件数で数え、0 になったら基本状態へ戻す。
+// tray は「基本状態(待機/リッスン/録音)」と、並行する「文字起こし」の件数を持ち、
+// メニューバーアイコン・ドロップダウンの状態テキスト・画面下部のバーをまとめて更新する。
+//
+// 表示の方針:
+//   - メニューバーは「マイクの生死」だけ(待機=黒テンプレート ⇄ リッスン/録音=オレンジ)。
+//     赤点滅やロボへの切り替えはやめ、詳細な状態はバー側に集約する。
+//   - バーはリッスン系の状態を主ラベルに出し、並行する文字起こしはロボのバッジ(×N)で示す
+//     (1 つ目を文字起こししながら 2 つ目を話せる=両立していることを表現する)。
+//   - リッスンを止めても文字起こしが残っていればバーを「文字起こし中…」で出し続け、
+//     全部流れ終わったら消す(止めた→流れるまでの空白を無くす)。
 var tray = &trayStatus{baseIcon: iconIdle, baseText: "待機中…"}
 
 type trayStatus struct {
 	mu           sync.Mutex
+	cfg          *config.Config // バー表示の可否(voice_bar)。serve で設定する
 	baseIcon     iconState
-	baseText     string
+	baseText     string // ドロップダウンの状態テキスト
+	barText      string // バーの主ラベル(リッスン系の状態のときだけ非空)
 	transcribing int
+	inputOpen    bool // 文字入力バーが開いている間は音声バーを引っ込める(同じ場所に出るため)
 }
 
-// setBase は基本状態を更新する。文字起こし中(💬表示中)は表示を上書きしない。
-func (t *trayStatus) setBase(state iconState, text string) {
+// setInputOpen は文字入力バーの開閉を反映する(開いている間は音声バーを出さない)。
+func (t *trayStatus) setInputOpen(open bool) {
+	t.mu.Lock()
+	t.inputOpen = open
+	t.mu.Unlock()
+	t.apply()
+}
+
+// setConfig はバー表示の設定を渡す(serve の先頭で一度呼ぶ)。
+func (t *trayStatus) setConfig(cfg *config.Config) {
+	t.mu.Lock()
+	t.cfg = cfg
+	t.mu.Unlock()
+}
+
+// setBase は基本状態を更新する。barText はバーの主ラベル(待機は空)。
+func (t *trayStatus) setBase(state iconState, menuText, barText string) {
 	t.mu.Lock()
 	t.baseIcon = state
-	t.baseText = text
-	show := t.transcribing == 0
+	t.baseText = menuText
+	t.barText = barText
 	t.mu.Unlock()
-	if show {
-		setState(state, text)
-	}
+	t.apply()
 }
 
-// beginTranscribe は「文字起こし中」を表示する。
+// beginTranscribe / endTranscribe は並行する文字起こしの件数を数える。
 func (t *trayStatus) beginTranscribe() {
 	t.mu.Lock()
 	t.transcribing++
 	t.mu.Unlock()
-	setState(iconTranscribe, "文字起こし中…")
+	t.apply()
 }
 
-// endTranscribe は文字起こし完了を反映し、全て終わったら基本状態へ戻す。
 func (t *trayStatus) endTranscribe() {
 	t.mu.Lock()
 	if t.transcribing > 0 {
 		t.transcribing--
 	}
-	done := t.transcribing == 0
-	s, txt := t.baseIcon, t.baseText
 	t.mu.Unlock()
-	if done {
-		setState(s, txt)
+	t.apply()
+}
+
+// apply は現在の状態をメニューバー・ドロップダウン・バーへ反映する。
+func (t *trayStatus) apply() {
+	t.mu.Lock()
+	icon, menuText, barText, n, cfg := t.baseIcon, t.baseText, t.barText, t.transcribing, t.cfg
+	inputOpen := t.inputOpen
+	t.mu.Unlock()
+
+	// メニューバー: マイクが生きているときだけオレンジ。それ以外は黒テンプレート。
+	if icon == iconListen || icon == iconRec {
+		systray.SetIcon(trayicon.ListenOn)
+	} else {
+		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
+	}
+
+	// ドロップダウンの状態テキスト(文字起こし中はそちらを優先表示)。
+	st := menuText
+	if n > 0 {
+		st = "文字起こし中…"
+	}
+	if mStatus != nil {
+		mStatus.SetTitle(st)
+	}
+
+	// 画面下部のバー。文字入力バーが開いている間は同じ場所を譲る(閉じたら復帰)。
+	if cfg == nil || !cfg.VoiceBar {
+		return
+	}
+	if inputOpen {
+		voicebar.Hide()
+		return
+	}
+	switch {
+	case barText != "": // リッスン/録音中(文字起こしが並行していればロボのバッジが付く)
+		voicebar.Show(barText, icon == iconRec, true, n)
+	case n > 0: // リッスンは止めたが文字起こしが流れ終わっていない
+		voicebar.Show("文字起こし中…", false, false, n)
+	default:
+		voicebar.Hide()
 	}
 }
 
@@ -429,6 +418,19 @@ func serve(dryRun bool) {
 	if err != nil {
 		log.Fatalf("設定エラー: %v", err)
 	}
+	tray.setConfig(cfg)
+
+	// 文字入力バーの開閉を追う。開いている間は音声バーを引っ込め(同じ場所に出るため)、
+	// 開いた通知は inputBarShown 経由で vadLoop へ渡してリッスンを止める(排他)。
+	// コールバックはメインスレッドから来るのでブロックしないこと。
+	inputbar.SetOnShown(func() {
+		tray.setInputOpen(true)
+		select {
+		case inputBarShown <- struct{}{}:
+		default:
+		}
+	})
+	inputbar.SetOnHidden(func() { tray.setInputOpen(false) })
 
 	// オーバーレイ・入力バー・ルームメニューを配線する(dryRun では画面に出さない)。
 	if !dryRun {
@@ -440,7 +442,7 @@ func serve(dryRun bool) {
 		log.Println("ℹ️ 音声入力は無効です(文字入力バーのみ)。")
 		setInfo(mInfoMode, "方式 : 文字入力のみ")
 		setInfo(mInfoKey, "入力バー : "+cfg.Room.InputHotkey.String())
-		tray.setBase(iconIdle, "待機中(文字入力のみ)…")
+		tray.setBase(iconIdle, "待機中(文字入力のみ)…", "")
 		return
 	}
 
@@ -536,18 +538,21 @@ func serve(dryRun bool) {
 
 	if cfg.ListenMode == "vad" {
 		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Hotkey)
-		tray.setBase(iconIdle, "待機中…")
+		tray.setBase(iconIdle, "待機中…", "")
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
 	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Hotkey)
-	tray.setBase(iconIdle, "待機中…")
+	tray.setBase(iconIdle, "待機中…", "")
 	pttLoop(rec, wh, out, cfg, down, up)
 }
 
 // voice は音声入力を今受け付けてよいかの状態(auto では出力デバイスに追従)。serve で構築。
 var voice *voicegate.Gate
+
+// inputBarShown は文字入力バーが開いたことを vadLoop へ伝える(音声リッスンとの排他用)。
+var inputBarShown = make(chan struct{}, 1)
 
 // applyVoiceAuto は出力構成の変化に応じて音声入力の可否を切り替える(auto 時のみ)。
 // audioout の監視コールバックから呼ばれる。
@@ -670,12 +675,21 @@ func playSound(name string) {
 	go func() { _ = cmd.Wait() }()
 }
 
+// flashVoiceBar は「押したのに始まらなかった」場面の通知をバーで一瞬出す。
+func flashVoiceBar(cfg *config.Config, label string) {
+	if cfg.VoiceBar {
+		voicebar.Flash(label)
+	}
+}
+
 // pttLoop は push-to-talk:押している間だけ録音し、離したら 1 回流す。
 func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down, up <-chan struct{}) {
 	for {
 		<-down
+		inputbar.Dismiss() // 文字入力バーが開いていたら閉じる(排他。フラッシュとも重ねない)
 		if !voice.Allowed() {
 			log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
+			flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
 			continue
 		}
 		if err := rec.Start(); err != nil {
@@ -683,12 +697,12 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 			continue
 		}
 		log.Println("● 録音中...")
-		tray.setBase(iconRec, "● 録音中…")
+		tray.setBase(iconRec, "● 録音中…", "録音中…")
 		playOn(cfg)
 
 		<-up
 		pcm, durMs, err := rec.Stop()
-		tray.setBase(iconIdle, "待機中…")
+		tray.setBase(iconIdle, "待機中…", "")
 		playOff(cfg)
 		if err != nil {
 			log.Printf("録音停止失敗: %v", err)
@@ -722,12 +736,21 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		go handle(wh, out, cfg, pcm)
 	})
 
-	// 発話の検出/終了をアイコンに反映する(リッスン中のみ意味を持つ)。
+	// 発話の検出/終了をアイコンと画面上のバーに反映する(リッスン中のみ意味を持つ)。
 	seg.OnActivity = func(active bool) {
 		if active {
-			tray.setBase(iconRec, "● 音声検出中…")
+			tray.setBase(iconRec, "● 音声検出中…", "音声を検出中…")
 		} else {
-			tray.setBase(iconListen, "聞き取り中(無音待ち)…")
+			tray.setBase(iconListen, "聞き取り中(無音待ち)…", "聞き取り中…")
+		}
+	}
+
+	// リッスン中は音量を画面上のバーの波形へ流す(オーディオスレッドから呼ばれる)。
+	feed := seg.Feed
+	if cfg.VoiceBar {
+		feed = func(pcm []byte) {
+			voicebar.Level(vad.RMS(pcm))
+			seg.Feed(pcm)
 		}
 	}
 
@@ -736,24 +759,30 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		rec.StopStream() // コールバックを止めてから Flush する(同時アクセスを避ける)
 		seg.Flush()
 		listening = false
-		tray.setBase(iconIdle, "待機中…")
+		tray.setBase(iconIdle, "待機中…", "")
 		playOff(cfg)
 	}
 	for {
 		if !listening {
 			voice.DrainRevoked() // リッスンしていない間に来た revoke は捨てる
 			<-down
+			inputbar.Dismiss() // 文字入力バーが開いていたら閉じる(排他。フラッシュとも重ねない)
 			if !voice.Allowed() {
 				log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice_input を \"on\" に)。")
+				flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
 				continue
 			}
-			if err := rec.StartStream(seg.Feed); err != nil {
+			if err := rec.StartStream(feed); err != nil {
 				log.Printf("リッスン開始失敗: %v", err)
 				continue
 			}
 			listening = true
+			select { // リッスンしていない間に開かれた通知は捨てる
+			case <-inputBarShown:
+			default:
+			}
 			log.Println("🎙 リッスン開始(話すと自動で区切って流す。もう一度キーで停止)")
-			tray.setBase(iconListen, "聞き取り中(無音待ち)…")
+			tray.setBase(iconListen, "聞き取り中(無音待ち)…", "聞き取り中…")
 			playOn(cfg)
 			continue
 		}
@@ -761,9 +790,13 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		case <-down: // 手動でトグル停止
 			log.Println("■ リッスン停止")
 			stop()
+		case <-inputBarShown: // 文字入力バーが開いた → 排他で停止
+			log.Println("⌨️ 文字入力バーを開いたため音声リッスンを停止しました。")
+			stop()
 		case <-voice.Revoked(): // リッスン中に出力がスピーカーへ変わった → 自動停止
 			log.Println("🔈 出力がスピーカーに変わったため音声入力を停止しました。")
 			stop()
+			flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
 		}
 	}
 }

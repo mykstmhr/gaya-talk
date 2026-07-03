@@ -1,4 +1,4 @@
-.PHONY: help build clean setup setup-voice app app-open dist model whisper-model enhance-model restart logs deploy
+.PHONY: help build clean setup setup-voice app app-open dist model whisper-model enhance-model restart logs deploy icons
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -56,13 +56,19 @@ setup-voice: ## 音声も使うセットアップ(config 配置 + whisper モデ
 build: ## バイナリをビルド(bin/ura-talk)
 	go build $(LDFLAGS) -o bin/ura-talk .
 
+# アイコン(メニューバー PNG と AppIcon.icns)をコードから再生成する。
+# デザインを変えるときは build/genicons.swift を編集してこれを叩く。
+icons: ## アイコン一式を再生成(build/genicons.swift)
+	swift build/genicons.swift
+
 # .app バンドルを生成し、アドホック署名する。
 # 権限(マイク/アクセシビリティ)はこの .app の身元に紐づくようになる。
 app: build ## .app を生成して署名する
 	rm -rf $(APP)
-	mkdir -p $(APP)/Contents/MacOS
+	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
 	cp bin/ura-talk $(APP)/Contents/MacOS/ura-talk
 	cp build/Info.plist $(APP)/Contents/Info.plist
+	cp build/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	@id="$(SIGN_IDENTITY)"; \
 	if ! security find-identity -p codesigning 2>/dev/null | grep -q "$$id"; then \
 	  echo "署名ID '$$id' がキーチェーンに無いためアドホック署名にフォールバックします"; id="-"; \

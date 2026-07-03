@@ -1,6 +1,8 @@
-// Package trayicon はメニューバー用のモノクロ/カラーアイコン(PNG)を埋め込んで提供する。
-// idle/listen/transcribe/pin はテンプレート(macOS が明暗に自動着色)、
-// rec/recRing は録音を目立たせるためのカラー(赤)。
+// Package trayicon はメニューバー用のアイコン(PNG)を埋め込んで提供する。
+// メニューバーは「マイクの生死」だけを表す方針: 待機は Idle(黒テンプレート=
+// macOS が明暗に自動着色)、リッスン/録音中は ListenOn(オレンジのカラー)。
+// 詳細な状態(録音・文字起こし)は画面下部のバー(internal/voicebar)が担う。
+// PNG は build/genicons.swift で生成する(make icons)。
 package trayicon
 
 import (
@@ -12,12 +14,12 @@ import (
 )
 
 //go:embed icons/idle.png
-var Idle []byte // 待機(一時停止)
+var Idle []byte // 待機(流れるコメントの吹き出し。アプリの顔)
 
 //go:embed icons/listen.png
-var Listen []byte // リッスン中(マイク・テンプレート)
+var Listen []byte // リッスン中(吹き出し+音波・テンプレート)
 
-// ListenOn はリッスン中を目立たせるオレンジ版マイク(カラー=非テンプレート)。
+// ListenOn はリッスン中を目立たせるオレンジ版(カラー=非テンプレート)。
 // リッスン中だけ SetIcon で使い、待機時はテンプレートの Listen/Idle に戻す。
 // 赤は録音中の点滅で使うため、リッスンはオレンジにして区別する。
 var ListenOn = tint(Listen, color.RGBA{R: 0xFF, G: 0x95, B: 0x00, A: 0xFF})
@@ -44,14 +46,3 @@ func tint(src []byte, c color.RGBA) []byte {
 	return buf.Bytes()
 }
 
-//go:embed icons/rec.png
-var Rec []byte // 録音中(赤丸・点滅の点灯フレーム)
-
-//go:embed icons/rec_ring.png
-var RecRing []byte // 録音中(赤リング・点滅の消灯フレーム)
-
-//go:embed icons/transcribe.png
-var Transcribe []byte // 文字起こし中(吹き出し)
-
-//go:embed icons/pin.png
-var Pin []byte // 固定先マーカー(ドロップダウン用のピン)

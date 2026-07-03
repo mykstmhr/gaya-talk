@@ -12,6 +12,9 @@
 	<string>ura-talk</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
+	<!-- Finder/配布 zip で表示されるアプリアイコン(build/genicons.swift で生成) -->
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>
