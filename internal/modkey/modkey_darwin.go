@@ -3,19 +3,18 @@
 // Package modkey は単体の修飾キー(右コマンド等)の押下/解放を CGEventTap で検出する。
 // golang.design/x/hotkey(Carbon RegisterEventHotKey)は修飾キー単体をホットキーに
 // できないため、こちらを使う。検出には macOS のアクセシビリティ権限が必要。
+//
+// 修飾キー 2 つのコード(例: 右Shift を押しながら右⌘)にも対応する(WatchChord)。
+// 同じキーに単体監視とコード監視の両方があるときは、コード成立時はコード側だけに
+// 届く(素の押下と区別され、音声トリガ等に誤爆しない)。
 package modkey
 
 /*
 #cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation
 #include <ApplicationServices/ApplicationServices.h>
 
-extern void modkeyGoCallback(int idx, int down);
+extern void modkeyGoCallback(int keycode, unsigned long long flags);
 
-// 監視対象のキーは複数登録できる(メイントリガ + 入力バー等)。タップは 1 本を共有する。
-#define MODKEY_MAX 8
-static int gKeycodes[MODKEY_MAX];
-static unsigned long long gMasks[MODKEY_MAX];
-static int gNumKeys = 0;
 static CFMachPortRef gTap = NULL;
 
 static CGEventRef modkeyTap(CGEventTapProxy proxy, CGEventType type, CGEventRef event, void *ctx) {
@@ -25,40 +24,29 @@ static CGEventRef modkeyTap(CGEventTapProxy proxy, CGEventType type, CGEventRef 
         return event;
     }
     if (type == kCGEventFlagsChanged) {
+        // flagsChanged は修飾キーの押下/解放時にしか来ないので全件 Go へ渡し、
+        // どのキーをどう扱うかは Go 側の watcher 表で決める。
         int64_t kc = CGEventGetIntegerValueField(event, kCGKeyboardEventKeycode);
-        CGEventFlags flags = CGEventGetFlags(event);
-        for (int i = 0; i < gNumKeys; i++) {
-            if ((int)kc == gKeycodes[i]) {
-                modkeyGoCallback(i, (flags & gMasks[i]) ? 1 : 0); // デバイス依存ビットで押下/解放を判定
-            }
-        }
+        modkeyGoCallback((int)kc, (unsigned long long)CGEventGetFlags(event));
     }
     return event;
 }
 
-// modkeyAdd は監視キーを 1 つ登録し、その添字を返す(満杯/タップ作成失敗は -1)。
-// 初回だけイベントタップを作り、以降は共有する。
-static int modkeyAdd(int keycode, unsigned long long mask) {
-    if (gNumKeys >= MODKEY_MAX) return -1;
+// modkeyEnsureTap はイベントタップを(まだ無ければ)作る。成功で 0。
+static int modkeyEnsureTap(void) {
+    if (gTap) return 0;
     __block int rc = 0;
-    if (!gTap) {
-        dispatch_sync(dispatch_get_main_queue(), ^{
-            CGEventMask m = CGEventMaskBit(kCGEventFlagsChanged);
-            CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
-                kCGEventTapOptionListenOnly, m, modkeyTap, NULL);
-            if (!tap) { rc = -1; return; }
-            gTap = tap;
-            CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(NULL, tap, 0);
-            CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
-            CGEventTapEnable(tap, true);
-        });
-        if (rc != 0) return -1;
-    }
-    int idx = gNumKeys;
-    gKeycodes[idx] = keycode;
-    gMasks[idx] = mask;
-    gNumKeys = idx + 1;
-    return idx;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        CGEventMask m = CGEventMaskBit(kCGEventFlagsChanged);
+        CFMachPortRef tap = CGEventTapCreate(kCGSessionEventTap, kCGHeadInsertEventTap,
+            kCGEventTapOptionListenOnly, m, modkeyTap, NULL);
+        if (!tap) { rc = -1; return; }
+        gTap = tap;
+        CFRunLoopSourceRef src = CFMachPortCreateRunLoopSource(NULL, tap, 0);
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, kCFRunLoopCommonModes);
+        CGEventTapEnable(tap, true);
+    });
+    return rc;
 }
 */
 import "C"
@@ -68,26 +56,53 @@ import (
 	"sync"
 )
 
-// watchers は登録順のチャネル(C 側の添字と対応)。コールバックと Watch の競合を守る。
+// watcher は監視 1 件。held が 0 なら単体キー、非 0 なら「held のビットが
+// 立っている(=その修飾キーを押しながら)ときの押下だけ」を流すコード監視。
+type watcher struct {
+	code int
+	mask uint64 // 自キーのデバイス依存ビット
+	held uint64 // コード条件(0 なら単体)
+	ch   chan bool
+}
+
 var (
 	watchMu  sync.Mutex
-	watchers []chan bool
+	watchers []*watcher
 )
 
 //export modkeyGoCallback
-func modkeyGoCallback(idx, down C.int) {
+func modkeyGoCallback(keycode C.int, flags C.ulonglong) {
+	kc, f := int(keycode), uint64(flags)
 	watchMu.Lock()
-	var ch chan bool
-	if int(idx) < len(watchers) {
-		ch = watchers[idx]
-	}
+	ws := make([]*watcher, len(watchers))
+	copy(ws, watchers)
 	watchMu.Unlock()
-	if ch == nil {
-		return
+
+	// 同じキーのコード監視が成立しているか(成立時は単体監視へ届けない)。
+	chordActive := false
+	for _, w := range ws {
+		if w.code == kc && w.held != 0 && f&w.held != 0 {
+			chordActive = true
+			break
+		}
 	}
-	select {
-	case ch <- (down != 0):
-	default: // バッファが詰まっていたら捨てる(取りこぼしは許容)
+	for _, w := range ws {
+		if w.code != kc {
+			continue
+		}
+		down := f&w.mask != 0
+		if w.held != 0 {
+			// コード監視: 押下は held 成立時のみ。解放は常に流す(押しっぱなし対策)。
+			if down && f&w.held == 0 {
+				continue
+			}
+		} else if down && chordActive {
+			continue // コードに横取りされた押下
+		}
+		select {
+		case w.ch <- down:
+		default: // バッファが詰まっていたら捨てる(取りこぼしは許容)
+		}
 	}
 }
 
@@ -106,6 +121,7 @@ var keys = map[string]key{
 	"rightalt":      {61, 0x40},
 	"leftoption":    {58, 0x20},
 	"rightshift":    {60, 0x04},
+	"leftshift":     {56, 0x02},
 	"fn":            {63, 0x800000},
 }
 
@@ -124,20 +140,38 @@ func Names() []string {
 // Watch は name の修飾キー監視を開始し、押下(true)/解放(false)を流すチャネルを返す
 // (要アクセシビリティ権限)。複数キーを個別に監視できる(イベントタップは共有)。
 func Watch(name string) (<-chan bool, error) {
-	k, ok := keys[name]
-	if !ok {
-		return nil, fmt.Errorf("未対応の修飾キー: %q", name)
+	return add(name, "")
+}
+
+// WatchChord は「held を押しながらの base」の押下だけを流す監視を開始する。
+// 例: WatchChord("rightcmd", "rightshift") = 右Shift+右⌘。
+// 同じ base の Watch とは排他で、コード成立時の押下はこちらだけに届く。
+func WatchChord(base, held string) (<-chan bool, error) {
+	if held == "" {
+		return nil, fmt.Errorf("held が空です")
 	}
-	watchMu.Lock()
-	defer watchMu.Unlock()
-	idx := int(C.modkeyAdd(C.int(k.code), C.ulonglong(k.mask)))
-	if idx < 0 {
+	return add(base, held)
+}
+
+func add(base, held string) (<-chan bool, error) {
+	b, ok := keys[base]
+	if !ok {
+		return nil, fmt.Errorf("未対応の修飾キー: %q", base)
+	}
+	var heldMask uint64
+	if held != "" {
+		h, ok := keys[held]
+		if !ok {
+			return nil, fmt.Errorf("未対応の修飾キー: %q", held)
+		}
+		heldMask = h.mask
+	}
+	if C.modkeyEnsureTap() != 0 {
 		return nil, fmt.Errorf("イベントタップの作成に失敗しました(アクセシビリティ権限が必要)")
 	}
-	ch := make(chan bool, 32)
-	for len(watchers) <= idx {
-		watchers = append(watchers, nil)
-	}
-	watchers[idx] = ch
-	return ch, nil
+	w := &watcher{code: b.code, mask: b.mask, held: heldMask, ch: make(chan bool, 32)}
+	watchMu.Lock()
+	watchers = append(watchers, w)
+	watchMu.Unlock()
+	return w.ch, nil
 }

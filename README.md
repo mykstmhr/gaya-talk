@@ -195,7 +195,7 @@ config の `hotkey` で変更(使えるキー名は `./bin/ura-talk keys`)。変
 | `keystroke.pin_target` | リッスン開始時に最前面だったアプリを固定し、**そのアプリが前面のときだけ**貼り付ける(別アプリ前面時はスキップ=誤爆防止)。VAD は固定先から前面が外れると自動でリッスン停止。`false` は従来どおり最前面へ貼り付け。メニューバーからも ON/OFF 可 | `false` |
 | `keystroke.overrides` | アプリ別の送信キー上書き。`[{ "app": "Slack", "send_key": "enter" }]` の形。`app` はアプリ表示名か bundle id(大文字小文字無視・完全一致) | `[]` |
 | `room.server` | room 出力の中継サーバ URL(`server/` のデプロイ先)。空ならソロモード | `""` |
-| `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式) | `rightoption` |
+| `room.input_hotkey` | 文字入力バーを出すキー(`hotkey` と同形式)。修飾キー 2 つのコードも可(例 `{"mods":["rightshift"],"key":"rightcmd"}` = 右⇧を押しながら右⌘) | `rightoption` |
 | `room.display_name` | 記名モードのルームで名乗る表示名(空なら匿名) | `""` |
 | `slack_client_id` | Slack アプリの Client ID | (slack 出力の login に必須) |
 | `slack_client_secret` | Slack アプリの Client Secret | (login に必須) |

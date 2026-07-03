@@ -184,11 +184,18 @@ func setRoomState(s room.State) {
 
 // watchDown はホットキーの押下だけを流すチャネルを返す(入力バー用)。
 // buildTrigger と同じく、単体修飾キーは CGEventTap、組み合わせは hotkey ライブラリを使う。
+// 修飾キー 2 つのコード(例 mods:["rightshift"], key:"rightcmd")にも対応する。
 func watchDown(h config.Hotkey) (<-chan struct{}, error) {
 	d := make(chan struct{}, 8)
 	keyName := strings.ToLower(h.Key)
-	if len(h.Mods) == 0 && modkey.Is(keyName) {
-		events, err := modkey.Watch(keyName)
+	if modkey.Is(keyName) && (len(h.Mods) == 0 || (len(h.Mods) == 1 && modkey.Is(strings.ToLower(h.Mods[0])))) {
+		var events <-chan bool
+		var err error
+		if len(h.Mods) == 1 {
+			events, err = modkey.WatchChord(keyName, strings.ToLower(h.Mods[0]))
+		} else {
+			events, err = modkey.Watch(keyName)
+		}
 		if err != nil {
 			return nil, err
 		}
