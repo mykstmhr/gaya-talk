@@ -283,7 +283,7 @@ var (
 	mirrorThread  string // 親メッセージの ts。以降のコメントはここへぶら下げる
 )
 
-// toggleSlackMirror は Slack 記録の開始/停止を切り替える。開始時に親メッセージを 1 本立てる。
+// toggleSlackMirror は Slack 記録の開始/停止を切り替える。
 func toggleSlackMirror(cfg *config.Config) {
 	mirrorMu.Lock()
 	on := mirroring
@@ -292,14 +292,23 @@ func toggleSlackMirror(cfg *config.Config) {
 		stopMirror()
 		return
 	}
-	r := roomClient.Room()
-	if r == nil {
-		log.Println("⚠️ ルームに参加していません。")
+	startMirror(cfg, roomClient.Room())
+}
+
+// startMirror は参加中ルームの記録先チャンネルへの転送を開始する(親メッセージを 1 本立てる)。
+// チャンネルはルーム(URL)由来。記録対象でない・トークンが無いルームでは何もしない。
+func startMirror(cfg *config.Config, r *room.Room) {
+	if r == nil || r.SlackChannel == "" {
+		log.Println("⚠️ このルームは Slack 記録対象ではありません(作成時にチャンネルを指定してください)。")
+		return
+	}
+	if strings.TrimSpace(cfg.Room.SlackBotToken) == "" {
+		log.Println("⚠️ Slack bot token が未設定のため記録できません。")
 		return
 	}
 	cl := slack.New(cfg.Room.SlackBotToken)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	ts, err := cl.PostMessage(ctx, cfg.Room.SlackChannel,
+	ts, err := cl.PostMessage(ctx, r.SlackChannel,
 		"📝 ura-talk のコメントをこのスレッドに記録します(room "+truncRunes(r.Token, 8)+")", "")
 	cancel()
 	if err != nil {
@@ -309,10 +318,12 @@ func toggleSlackMirror(cfg *config.Config) {
 	mirrorMu.Lock()
 	mirroring = true
 	mirrorClient = cl
-	mirrorChannel = cfg.Room.SlackChannel
+	mirrorChannel = r.SlackChannel
 	mirrorThread = ts
 	mirrorMu.Unlock()
-	mSlackMirror.Check()
+	if mSlackMirror != nil {
+		mSlackMirror.Check()
+	}
 	log.Println("✅ Slack 記録を開始しました(以降のコメントをスレッドに転送します)。")
 }
 
@@ -363,6 +374,17 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 			return
 		}
 	}
+	// Slack トークンを持つ人には、このルームの記録先チャンネルを尋ねる(空欄で記録なし)。
+	// チャンネルは URL に載り、全参加者が「記録対象」であることを知れる。
+	channel := ""
+	if strings.TrimSpace(cfg.Room.SlackBotToken) != "" {
+		entered, ok := dialog.Prompt("Slack 記録(任意)",
+			"このルームを記録する Slack チャンネル ID(空欄で記録しない)。全参加者に「記録対象」と表示されます。",
+			"例: C0123ABCD", strings.TrimSpace(cfg.Room.SlackChannel), "作成")
+		if ok {
+			channel = strings.TrimSpace(entered)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	r, err := room.Create(ctx, cfg.Room.Server, named)
@@ -370,9 +392,13 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 		log.Printf("⚠️ %v", err)
 		return
 	}
+	r.SlackChannel = channel
 	kind := "匿名"
 	if named {
 		kind = "記名(表示名: " + currentDisplayName() + ")"
+	}
+	if channel != "" {
+		kind += "・Slack記録"
 	}
 	if err := pbcopy(r.URL()); err != nil {
 		// コピーできなくても URL は必要なのでログに出す(鍵入りだが自分のログなので許容)。
@@ -381,6 +407,10 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 		log.Printf("✅ %sルームを作成し、共有 URL をクリップボードへコピーしました。メンバーに共有してください。", kind)
 	}
 	roomClient.Join(r)
+	// 作成者は記録先を指定していれば自動でミラーを開始する(他のトークン保持者は手動)。
+	if channel != "" {
+		startMirror(cfg, r)
+	}
 }
 
 // displayName は記名ルームで名乗る現在の表示名(空=未設定)。config か内部ファイル、
@@ -493,6 +523,11 @@ func joinRoomWithDialog(cfg *config.Config) {
 		}
 		log.Printf("ℹ️ 記名ルームに参加します(あなたの表示名: %s)。", currentDisplayName())
 	}
+	if r.SlackChannel != "" {
+		// 記録対象であることを本人にもはっきり知らせる(オーバーレイにも一度出す)。
+		log.Println("🔴 このルームは Slack に記録されます。")
+		overlay.Show("🔴 このルームは Slack に記録されます", "#ff6666")
+	}
 	roomClient.Join(r)
 }
 
@@ -503,17 +538,22 @@ func setRoomState(s room.State) {
 		return
 	}
 	id := ""
+	recorded := false
 	if r := roomClient.Room(); r != nil {
 		tag := "匿名"
 		if r.Named {
 			tag = "記名"
 		}
 		id = " (" + truncRunes(r.Token, 8) + " / " + tag + ")"
+		if r.SlackChannel != "" {
+			id += " 🔴Slack記録対象"
+			recorded = true
+		}
 	}
-	// URL コピー・Slack 記録は、ルームに属している間(接続試行中含む)は使える。
+	// URL コピーはルームに属している間は使える。Slack 記録トグルは「記録対象ルーム」でのみ。
 	joined := roomClient.Room() != nil
 	toggle(mRoomCopyURL, joined)
-	toggle(mSlackMirror, joined)
+	toggle(mSlackMirror, joined && recorded)
 	if !joined {
 		stopMirror() // 切断されたら記録も止める
 	}

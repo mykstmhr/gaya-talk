@@ -22,7 +22,11 @@ type Room struct {
 	Server string // 例 "https://ura-talk-room.example.workers.dev"
 	Token  string // ルームトークン(base64url 22文字)
 	Key    []byte // AES-256-GCM 鍵(32 バイト)
-	Named  bool   // 記名モードか(#...&n=1)。v1.1 用に URL 形式だけ先に決めておく
+	Named  bool   // 記名モードか(#...&n=1)
+	// SlackChannel は Slack 記録対象チャンネル(#...&slack=)。空なら記録対象でない。
+	// URL に持たせることで「このルームは記録対象」を全参加者が知れる(透明性)。
+	// bot token は URL には入れず、記録するのは token を持つ人だけ。
+	SlackChannel string
 }
 
 // tokenRe はサーバが発行するトークンの形(128bit base64url、パディングなし)。
@@ -42,6 +46,9 @@ func (r *Room) URL() string {
 	frag := "k=" + base64.RawURLEncoding.EncodeToString(r.Key)
 	if r.Named {
 		frag += "&n=1"
+	}
+	if r.SlackChannel != "" {
+		frag += "&slack=" + url.QueryEscape(r.SlackChannel)
 	}
 	return fmt.Sprintf("%s/r/%s#%s", strings.TrimSuffix(r.Server, "/"), r.Token, frag)
 }
@@ -76,10 +83,11 @@ func Parse(raw string) (*Room, error) {
 		return nil, fmt.Errorf("URL に有効な鍵(#k=...)がありません")
 	}
 	return &Room{
-		Server: u.Scheme + "://" + u.Host,
-		Token:  parts[1],
-		Key:    key,
-		Named:  frag.Get("n") == "1",
+		Server:       u.Scheme + "://" + u.Host,
+		Token:        parts[1],
+		Key:          key,
+		Named:        frag.Get("n") == "1",
+		SlackChannel: frag.Get("slack"),
 	}, nil
 }
 

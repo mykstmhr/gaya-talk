@@ -11,16 +11,17 @@ func TestURLRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &Room{
-		Server: "https://ura-talk-room.example.workers.dev",
-		Token:  "abcdefghijKLMNOPQRST12",
-		Key:    key,
-		Named:  true,
+		Server:       "https://ura-talk-room.example.workers.dev",
+		Token:        "abcdefghijKLMNOPQRST12",
+		Key:          key,
+		Named:        true,
+		SlackChannel: "C0123ABCD",
 	}
 	got, err := Parse(r.URL())
 	if err != nil {
 		t.Fatalf("Parse(%q): %v", r.URL(), err)
 	}
-	if got.Server != r.Server || got.Token != r.Token || !got.Named {
+	if got.Server != r.Server || got.Token != r.Token || !got.Named || got.SlackChannel != r.SlackChannel {
 		t.Errorf("Parse 結果が一致しない: %+v", got)
 	}
 	if string(got.Key) != string(r.Key) {

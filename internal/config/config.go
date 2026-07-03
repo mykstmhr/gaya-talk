@@ -105,6 +105,7 @@ type RoomConfig struct {
 	// 環境変数 URATALK_SLACK_BOT_TOKEN でも渡せる(config に平文で書きたくない場合)。
 	SlackBotToken string `json:"slack_bot_token"`
 	// SlackChannel は Slack ミラーの投稿先チャンネル(ID "C0123..." 推奨、"#general" も可)。
+	// ルーム作成時にチャンネルを尋ねる際の既定値。実際の記録先はルームごとに URL に載る。
 	SlackChannel string `json:"slack_channel"`
 }
 
