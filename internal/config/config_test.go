@@ -18,6 +18,7 @@ func TestMigrateLegacy(t *testing.T) {
 		"hotkey": {"mods": ["rightshift"], "key": "rightcmd"},
 		"input_device": "MacBook",
 		"voice_bar": false,
+		"sound": {"enabled": false, "on": "Ping", "off": "Bottle"},
 		"min_duration_ms": 500,
 		"vad": {"threshold": 0.02},
 		"whisper_bin": "/opt/homebrew/bin/whisper-cli",
@@ -63,6 +64,10 @@ func TestMigrateLegacy(t *testing.T) {
 	if cfg.Voice.VAD.Threshold != 0.02 {
 		t.Errorf("voice.vad.threshold = %v", cfg.Voice.VAD.Threshold)
 	}
+	// 旧フラットスキーマの sound はトップレベルのまま(現行と同じ場所)。
+	if cfg.Sound.Enabled || cfg.Sound.On != "Ping" {
+		t.Errorf("sound = %+v", cfg.Sound)
+	}
 	if cfg.Whisper.Bin != "/opt/homebrew/bin/whisper-cli" {
 		t.Errorf("whisper.bin = %q", cfg.Whisper.Bin)
 	}
@@ -87,7 +92,7 @@ func TestMigrateLegacy(t *testing.T) {
 func TestMigrateLegacyNewKeyWins(t *testing.T) {
 	mixed := []byte(`{
 		"voice_input": "on",
-		"voice": {"input": "off"},
+		"voice": {"input": "off", "sound": {"enabled": true, "on": "Frog"}},
 		"whisper_model": "old.bin",
 		"whisper": {"model": "new.bin"}
 	}`)
@@ -104,6 +109,10 @@ func TestMigrateLegacyNewKeyWins(t *testing.T) {
 	}
 	if cfg.Whisper.Model != "new.bin" {
 		t.Errorf("whisper.model = %q(新キーが勝つはず)", cfg.Whisper.Model)
+	}
+	// 効果音が音声専用だった時期の voice.sound はトップレベルへ写る。
+	if !cfg.Sound.Enabled || cfg.Sound.On != "Frog" {
+		t.Errorf("sound = %+v(voice.sound から写るはず)", cfg.Sound)
 	}
 }
 
@@ -147,4 +156,8 @@ func TestExampleConfig(t *testing.T) {
 	if cfg.Enhance.Model != "qwen2.5:3b" || cfg.Enhance.Backend != "ollama" {
 		t.Errorf("enhance = %+v", cfg.Enhance)
 	}
+	if !cfg.Sound.Enabled || cfg.Sound.InputOpen != "Pop" || cfg.Sound.InputClose != "Bottle" {
+		t.Errorf("sound = %+v", cfg.Sound)
+	}
 }
+

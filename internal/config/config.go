@@ -22,6 +22,8 @@ type Config struct {
 	// InputHotkey は文字入力バーを出すキー(主入力)。ルーム未参加のソロモードでも
 	// 使うためトップレベルに置く。音声トリガの voice.hotkey とは別のキーにすること。
 	InputHotkey Hotkey `json:"input_hotkey"`
+	// Sound は効果音(文字入力バーの開閉・音声リッスンの開始/停止)。
+	Sound SoundConfig `json:"sound"`
 	// Voice は音声入力(マイク→文字起こし)の設定一式。使わない人は voice.input:"off"
 	// だけで残りは無視される。
 	Voice VoiceConfig `json:"voice"`
@@ -55,8 +57,6 @@ type VoiceConfig struct {
 	Gain GainConfig `json:"gain"`
 	// MinDurationMs 未満の録音は無視する(ptt の誤爆防止)。
 	MinDurationMs int `json:"min_duration_ms"`
-	// Sound は有効化/無効化時に鳴らす効果音。
-	Sound SoundConfig `json:"sound"`
 	// Bar はリッスン/録音中に画面下部へ小さな状態バー(音量メーター付き)を出すか。
 	// バーは画面共有には映らず、クリックは下のアプリへ素通しする。
 	Bar bool `json:"bar"`
@@ -165,11 +165,14 @@ type VADConfig struct {
 	PrerollMs    int     `json:"preroll_ms"`     // 発話開始の手前を含める量
 }
 
-// SoundConfig は効果音の設定。On/Off は /System/Library/Sounds/ の名前(拡張子なし)。
+// SoundConfig は効果音の設定。音名は /System/Library/Sounds/ の名前(拡張子なし)。
+// 個別に鳴らしたくない音は名前を空にする。
 type SoundConfig struct {
-	Enabled bool   `json:"enabled"`
-	On      string `json:"on"`  // 有効化(リッスン開始/録音開始)時
-	Off     string `json:"off"` // 無効化(停止)時
+	Enabled    bool   `json:"enabled"`
+	InputOpen  string `json:"input_open"`  // 文字入力バーを開いたとき
+	InputClose string `json:"input_close"` // 文字入力バーを閉じたとき
+	On         string `json:"on"`          // 音声リッスン/録音の開始時
+	Off        string `json:"off"`         // 音声リッスン/録音の停止時
 }
 
 // Hotkey は修飾キーとメインキーの組。
@@ -189,13 +192,13 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Room:        RoomConfig{},
 		InputHotkey: Hotkey{Key: "rightcmd"},
+		Sound:       SoundConfig{Enabled: true, InputOpen: "Pop", InputClose: "Bottle", On: "Submarine", Off: "Bottle"},
 		Voice: VoiceConfig{
 			Input:         VoiceAuto,
 			Hotkey:        Hotkey{Mods: []string{"rightshift"}, Key: "rightcmd"},
 			ListenMode:    "vad",
 			MinDurationMs: 300,
 			Gain:          GainConfig{Enabled: true, TargetPeak: 0.95, MaxGain: 12},
-			Sound:         SoundConfig{Enabled: true, On: "Submarine", Off: "Bottle"},
 			Bar:           true,
 			VAD: VADConfig{
 				Threshold:    0.01,
@@ -254,7 +257,6 @@ var legacyMoves = []struct {
 	{"vad", []string{"voice", "vad"}},
 	{"gain", []string{"voice", "gain"}},
 	{"min_duration_ms", []string{"voice", "min_duration_ms"}},
-	{"sound", []string{"voice", "sound"}},
 	{"voice_bar", []string{"voice", "bar"}},
 	{"whisper_bin", []string{"whisper", "bin"}},
 	{"whisper_model", []string{"whisper", "model"}},
@@ -284,6 +286,14 @@ func migrateLegacy(plain []byte) ([]byte, error) {
 		if v, ok := room["input_hotkey"]; ok {
 			delete(room, "input_hotkey")
 			setIfAbsent(raw, []string{"input_hotkey"}, v)
+		}
+	}
+	// 効果音は音声専用だった時期に voice.sound へ置いていた(旧フラットスキーマの
+	// トップレベル sound が現行と同じ場所なので、legacyMoves には載せない)。
+	if voice, ok := raw["voice"].(map[string]any); ok {
+		if v, ok := voice["sound"]; ok {
+			delete(voice, "sound")
+			setIfAbsent(raw, []string{"sound"}, v)
 		}
 	}
 	return json.Marshal(raw)

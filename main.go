@@ -411,17 +411,26 @@ func serve(dryRun bool) {
 	}
 	tray.setConfig(cfg)
 
-	// 文字入力バーの開閉を追う。開いている間は音声バーを引っ込め(同じ場所に出るため)、
-	// 開いた通知は inputBarShown 経由で vadLoop へ渡してリッスンを止める(排他)。
+	// 文字入力バーの開閉を追う。開いたら効果音を鳴らし、開いている間は音声バーを
+	// 引っ込め(同じ場所に出るため)、開いた通知は inputBarShown 経由で vadLoop へ
+	// 渡してリッスンを止める(排他)。
 	// コールバックはメインスレッドから来るのでブロックしないこと。
 	inputbar.SetOnShown(func() {
+		if cfg.Sound.Enabled {
+			playSound(cfg.Sound.InputOpen)
+		}
 		tray.setInputOpen(true)
 		select {
 		case inputBarShown <- struct{}{}:
 		default:
 		}
 	})
-	inputbar.SetOnHidden(func() { tray.setInputOpen(false) })
+	inputbar.SetOnHidden(func() {
+		if cfg.Sound.Enabled {
+			playSound(cfg.Sound.InputClose)
+		}
+		tray.setInputOpen(false)
+	})
 
 	// オーバーレイ・入力バー・ルームメニューを配線する(dryRun では画面に出さない)。
 	if !dryRun {
@@ -654,16 +663,16 @@ func buildTrigger(h config.Hotkey) (down, up <-chan struct{}, stop func(), err e
 	return d, u, func() { hk.Unregister() }, nil
 }
 
-// playOn / playOff は有効化/無効化の効果音を鳴らす(設定で無効なら何もしない)。
+// playOn / playOff は音声リッスンの開始/停止の効果音を鳴らす(設定で無効なら何もしない)。
 func playOn(cfg *config.Config) {
-	if cfg.Voice.Sound.Enabled {
-		playSound(cfg.Voice.Sound.On)
+	if cfg.Sound.Enabled {
+		playSound(cfg.Sound.On)
 	}
 }
 
 func playOff(cfg *config.Config) {
-	if cfg.Voice.Sound.Enabled {
-		playSound(cfg.Voice.Sound.Off)
+	if cfg.Sound.Enabled {
+		playSound(cfg.Sound.Off)
 	}
 }
 
