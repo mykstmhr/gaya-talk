@@ -22,7 +22,12 @@
 
 会議音声をスピーカーで流している人や、音声入力が要らない人はこれで十分です。**whisper.cpp もモデルもマイクも Ollama も不要**です。
 
-**いちばん簡単なのは配布された `.app` を使うこと**。ホストから zip を受け取るか [Releases](https://github.com/mykstmhr/ura-talk/releases) からダウンロードして、解凍・起動するだけです(ビルド不要。初回だけ Gatekeeper のため右クリック →「開く」)。設定ファイルは初回起動時に `~/.config/ura-talk/config.json` へ自動生成されます。
+**いちばん簡単なのは配布された `.app` を使うこと**。ホストから zip を受け取るか [Releases](https://github.com/mykstmhr/ura-talk/releases) からダウンロードして(ビルド不要):
+
+1. 解凍した `ura-talk.app` を **「アプリケーション」フォルダへ移動**(重要: ダウンロードフォルダに置いたまま開くと、Gatekeeper のパスランダム化でホットキーが効かない)
+2. 初回だけ **右クリック →「開く」**(Gatekeeper を通す)
+
+設定ファイルは初回起動時に `~/.config/ura-talk/config.json` へ自動生成されます。
 
 自分でビルドする場合:
 

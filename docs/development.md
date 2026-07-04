@@ -21,12 +21,16 @@ Go 1.26.4+ が必要。Finder/`.app` 起動では作業ディレクトリが `/`
 
 `make dist` が `dist/ura-talk.app.zip` を作る。ビルド環境の無いメンバーに配れる。ただし **自己署名/アドホック署名**なので、受け取った人は初回のみ Gatekeeper を通す必要がある:
 
-- Finder でアプリを**右クリック →「開く」**(以後は普通に起動できる)
+- 解凍した .app を **「アプリケーション」フォルダへ移動してから**、Finder で**右クリック →「開く」**(以後は普通に起動できる)
 - またはターミナルで `xattr -dr com.apple.quarantine /path/to/ura-talk.app`
+
+移動せず quarantine 付きのまま開くと **App Translocation**(パスランダム化)でホットキーが効かなくなる。アプリ側でも検知して警告ダイアログを出す(`warnIfTranslocated`)。
 
 起動後にアクセシビリティ権限を許可する。設定ファイルが無ければ初回起動時にコメント付きの雛形(config.example.json を埋め込んだもの)を `~/.config/ura-talk/config.json` へ自動生成し、メニューの「設定ファイルを開く…」から編集できる(反映はメニューの「再起動」)。whisper が未設定・未導入でも落ちず、文字入力のみで動く。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
 
 **GitHub Release**: `make release VERSION=v1.2.3` でタグを push すると、[release.yml](../.github/workflows/release.yml) がテスト → `make dist` → zip を Release に添付する(ローカルの未コミット変更・テスト失敗があれば release は中断される)。
+
+Release の署名には secrets の自己署名証明書 **`ura-talk-dist`**(`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`)を使う。毎リリース同じ身元になるため、**利用者が付与した権限がアプリ更新後も失効しない**。secrets が未設定でもアドホック署名にフォールバックして Release 自体は作られる(その場合は更新のたびに権限の再付与が必要)。証明書を作り直す(=身元が変わる)と全員が権限を付与し直しになる点に注意。
 
 > 不特定多数に配るなら Apple Developer ID による署名 + notarization が必要(この構成では未対応)。社内・小チームでの共有を想定。
 

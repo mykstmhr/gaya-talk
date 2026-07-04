@@ -31,6 +31,7 @@ import (
 
 	"github.com/mykstmhr/ura-talk/internal/audioout"
 	"github.com/mykstmhr/ura-talk/internal/config"
+	"github.com/mykstmhr/ura-talk/internal/dialog"
 	"github.com/mykstmhr/ura-talk/internal/enhance"
 	"github.com/mykstmhr/ura-talk/internal/inputbar"
 	"github.com/mykstmhr/ura-talk/internal/modkey"
@@ -104,6 +105,23 @@ func restartApp() {
 	}
 	log.Println("再起動します…")
 	systray.Quit()
+}
+
+// warnIfTranslocated は Gatekeeper の App Translocation(パスランダム化)下で
+// 動いていたら警告ダイアログを出す。quarantine 付きの zip を解凍してその場から
+// 開くと起動ごとに変わる読み取り専用パスで実行され、アクセシビリティ権限が
+// アプリに紐づかずホットキー(CGEventTap)が一切拾えなくなる。
+// 移動して開き直せば解消するので、起動は止めない(オーバーレイ表示などは動く)。
+func warnIfTranslocated() {
+	exe, err := os.Executable()
+	if err != nil || !strings.Contains(exe, "/AppTranslocation/") {
+		return
+	}
+	log.Println("⚠️ App Translocation 下で起動しています(quarantine 付きのまま開いた)。ホットキーが使えません。アプリを移動して開き直してください。")
+	dialog.Alert("ura-talk を移動してください",
+		"Gatekeeper により一時的なパスから起動されているため、ホットキー(右⌘ など)が使えません。\n\n"+
+			"ura-talk.app を Finder で「アプリケーション」フォルダへ移動してから、開き直してください。",
+		"OK")
 }
 
 // setupLogging は、.app バンドルから起動された場合にログを ~/Library/Logs/ura-talk.log へ出す。
@@ -491,6 +509,7 @@ func acquireSingleInstance() bool {
 // serve は本体処理:設定読込→送り先決定→録音・ホットキー→常駐ループ。
 // systray のメインループ上(別 goroutine)で動く。dryRun のときは送らず表示のみ。
 func serve(dryRun bool) {
+	warnIfTranslocated()
 	ensureDefaultConfig()
 	cfg, err := config.Load()
 	if err != nil {

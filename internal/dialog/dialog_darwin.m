@@ -56,3 +56,17 @@ char* dialogPrompt(const char *title, const char *message, const char *placehold
     });
     return result;
 }
+
+// dialogAlert は入力欄なしの警告ダイアログを出す(OK のみ)。
+// どのスレッドから呼んでもよい(メインへ同期ディスパッチ)。
+void dialogAlert(const char *title, const char *message, const char *okLabel) {
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = [NSString stringWithUTF8String:title ?: ""];
+        alert.informativeText = [NSString stringWithUTF8String:message ?: ""];
+        [alert addButtonWithTitle:[NSString stringWithUTF8String:okLabel ?: "OK"]];
+        [NSApp activateIgnoringOtherApps:YES];
+        [alert runModal];
+        [alert release];
+    });
+}

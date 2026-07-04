@@ -8,6 +8,7 @@ package dialog
 #include <stdlib.h>
 char* dialogPrompt(const char *title, const char *message, const char *placeholder,
                    const char *initial, const char *okLabel);
+void dialogAlert(const char *title, const char *message, const char *okLabel);
 */
 import "C"
 
@@ -34,4 +35,17 @@ func Prompt(title, message, placeholder, initial, okLabel string) (string, bool)
 	}
 	defer C.free(unsafe.Pointer(res))
 	return C.GoString(res), true
+}
+
+// Alert は入力欄なしの警告ダイアログを出す(OK のみ)。閉じられるまでブロックする。
+func Alert(title, message, okLabel string) {
+	ct := C.CString(title)
+	cm := C.CString(message)
+	co := C.CString(okLabel)
+	defer func() {
+		C.free(unsafe.Pointer(ct))
+		C.free(unsafe.Pointer(cm))
+		C.free(unsafe.Pointer(co))
+	}()
+	C.dialogAlert(ct, cm, co)
 }
