@@ -22,10 +22,17 @@
 
 会議音声をスピーカーで流している人や、音声入力が要らない人はこれで十分です。**whisper.cpp もモデルもマイクも Ollama も不要**です。
 
-**いちばん簡単なのは配布された `.app` を使うこと**。ホストから zip を受け取るか [Releases](https://github.com/mykstmhr/ura-talk/releases) からダウンロードして(ビルド不要):
+**いちばん簡単なのはターミナルで 1 コマンド**(ビルド不要。`gh`([GitHub CLI](https://cli.github.com/))でダウンロードすると quarantine が付かず、Gatekeeper の警告も出ない。インストールとアップデートが同じコマンド):
 
-1. 解凍した `ura-talk.app` を **「アプリケーション」フォルダへ移動**(重要: ダウンロードフォルダに置いたまま開くと、Gatekeeper のパスランダム化でホットキーが効かない)
-2. 初回だけ **右クリック →「開く」**(Gatekeeper を通す)
+```sh
+gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir /tmp --clobber \
+  && ditto -x -k /tmp/ura-talk.app.zip /Applications \
+  && open /Applications/ura-talk.app
+```
+
+(`gh` が無ければ `brew install gh && gh auth login`。private repo のためブラウザ・curl では要認証)
+
+ブラウザで [Releases](https://github.com/mykstmhr/ura-talk/releases) から zip を落とした場合は、解凍した `ura-talk.app` を**「アプリケーション」フォルダへ移動**してから開く(ダウンロードフォルダのまま開くと Gatekeeper のパスランダム化でホットキーが効かない)。未公証のため「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通す。
 
 設定ファイルは初回起動時に `~/.config/ura-talk/config.json` へ自動生成されます。
 

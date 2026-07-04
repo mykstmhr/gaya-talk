@@ -54,10 +54,16 @@ jobs:
           files: dist/ura-talk.app.zip
           generate_release_notes: true
           body: |
-            `ura-talk.app.zip` を解凍して使ってください(macOS / Apple Silicon)。
+            macOS (Apple Silicon) 用です。**ターミナルで 1 コマンドが簡単**(`gh` 経由なら Gatekeeper の警告が出ません。アップデートも同じコマンド):
 
-            - 解凍した `ura-talk.app` を**「アプリケーション」フォルダへ移動**(重要: ダウンロードフォルダのまま開くと Gatekeeper のパスランダム化でホットキーが効きません)
-            - 初回のみ Gatekeeper のため **右クリック →「開く」**(または `xattr -dr com.apple.quarantine /Applications/ura-talk.app`)
-            - 起動したら**アクセシビリティ権限**を許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る
+            ```sh
+            gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir /tmp --clobber \
+              && ditto -x -k /tmp/ura-talk.app.zip /Applications \
+              && open /Applications/ura-talk.app
+            ```
+
+            ブラウザでダウンロードした場合は、解凍した `ura-talk.app` を**「アプリケーション」フォルダへ移動**してから開いてください(ダウンロードフォルダのまま開くとホットキーが効きません)。「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通せます。
+
+            起動したら**アクセシビリティ権限**を許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼るだけです。
             - 設定ファイルは初回起動時に `~/.config/ura-talk/config.json` に自動生成されます(メニューの「設定ファイルを開く…」から編集できます)
             - 声も使う場合は別途 `brew install whisper-cpp` とモデルが必要です(リポジトリの README 参照)
