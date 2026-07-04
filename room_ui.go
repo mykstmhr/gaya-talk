@@ -125,6 +125,9 @@ func setupRoom(cfg *config.Config) {
 	} else {
 		go func() {
 			for range down {
+				if os.Getenv("URATALK_DEBUG") != "" {
+					log.Println("inputbar: ホットキー検知 → Toggle 呼び出し")
+				}
 				inputbar.Toggle()
 			}
 		}()

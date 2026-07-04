@@ -13,6 +13,20 @@ package modkey
 #cgo LDFLAGS: -framework ApplicationServices -framework CoreFoundation
 #include <ApplicationServices/ApplicationServices.h>
 
+// modkeyTrusted はアクセシビリティ権限が有効かを返す(prompt 非 0 でシステムの
+// 許可ダイアログも出す)。権限が無いとイベントタップは「自分宛のイベント」しか
+// 受け取れず、非アクティブ時にホットキーが沈黙する(エラーにはならない)。
+static int modkeyTrusted(int prompt) {
+    if (!prompt) return AXIsProcessTrusted() ? 1 : 0;
+    CFStringRef keys[] = { kAXTrustedCheckOptionPrompt };
+    CFBooleanRef vals[] = { kCFBooleanTrue };
+    CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1,
+        &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    int ok = AXIsProcessTrustedWithOptions(opts) ? 1 : 0;
+    CFRelease(opts);
+    return ok;
+}
+
 extern void modkeyGoCallback(int keycode, unsigned long long flags);
 
 static CFMachPortRef gTap = NULL;
@@ -53,8 +67,14 @@ import "C"
 
 import (
 	"fmt"
+	"log"
+	"os"
 	"sync"
 )
+
+// debug は URATALK_DEBUG 時に flagsChanged の受信と watcher への配送をログに出す
+// (「キーは押されているのにバーが出ない」型の切り分け用)。
+var debug = os.Getenv("URATALK_DEBUG") != ""
 
 // watcher は監視 1 件。held が 0 なら単体キー、非 0 なら「held のビットが
 // 立っている(=その修飾キーを押しながら)ときの押下だけ」を流すコード監視。
@@ -76,6 +96,9 @@ var (
 //export modkeyGoCallback
 func modkeyGoCallback(keycode C.int, flags C.ulonglong) {
 	kc, f := int(keycode), uint64(flags)
+	if debug {
+		log.Printf("modkey: flagsChanged keycode=%d flags=%#x", kc, f)
+	}
 	watchMu.Lock()
 	defer watchMu.Unlock()
 
@@ -99,6 +122,9 @@ func modkeyGoCallback(keycode C.int, flags C.ulonglong) {
 			}
 		} else if down && chordActive {
 			continue // コードに横取りされた押下
+		}
+		if debug {
+			log.Printf("modkey: → watcher code=%d held=%#x down=%v", w.code, w.held, down)
 		}
 		select {
 		case w.ch <- down:
@@ -124,6 +150,18 @@ var keys = map[string]key{
 	"rightshift":    {60, 0x04},
 	"leftshift":     {56, 0x02},
 	"fn":            {63, 0x800000},
+}
+
+// Trusted はアクセシビリティ権限がこのビルドに対して有効かを返す。
+// prompt=true ならシステムの許可ダイアログも出す。権限が無くてもイベントタップの
+// 作成は成功してしまい、非アクティブ時だけホットキーが沈黙する(自分宛のイベントは
+// 届くため、アクティブ時は動いて見える)。起動時にこれで検査して警告する。
+func Trusted(prompt bool) bool {
+	p := C.int(0)
+	if prompt {
+		p = 1
+	}
+	return C.modkeyTrusted(p) != 0
 }
 
 // Is は name が対応する単体修飾キーかを返す。

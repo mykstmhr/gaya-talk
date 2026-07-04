@@ -522,6 +522,9 @@ func serve(dryRun bool) {
 	// 渡してリッスンを止める(排他)。
 	// コールバックはメインスレッドから来るのでブロックしないこと。
 	inputbar.SetOnShown(func() {
+		if logBodyEnabled() {
+			log.Println("inputbar: 表示コールバック(OnShown)")
+		}
 		if cfg.Sound.Enabled {
 			playSound(cfg.Sound.InputOpen)
 		}
@@ -537,6 +540,16 @@ func serve(dryRun bool) {
 		}
 		tray.setInputOpen(false)
 	})
+
+	// アクセシビリティ権限が無くてもイベントタップの作成は成功してしまい、
+	// 「アクティブなときだけホットキーが効く」という不可解な挙動になる。
+	// 起動時に検査してシステムの許可ダイアログを出し、ログにも残す。
+	// 設定のトグルが ON に見えるのに false になる場合は、署名の違う旧ビルドへの
+	// 許可が残っている(設定から一度削除して追加し直すと直る)。
+	if !modkey.Trusted(true) {
+		log.Println("⚠️ アクセシビリティ権限が有効ではありません。ホットキーはアプリが非アクティブの間は反応しません。" +
+			"システム設定 → プライバシーとセキュリティ → アクセシビリティの ura-talk を一度削除(−)してから追加し直してください。")
+	}
 
 	// オーバーレイ・入力バー・ルームメニューを配線する(dryRun では画面に出さない)。
 	if !dryRun {
