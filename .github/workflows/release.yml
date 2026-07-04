@@ -1,6 +1,10 @@
 # v* タグを push すると .app を zip 化して GitHub Release に添付する。
-# CI には署名証明書が無いためアドホック署名になる(Makefile が自動フォールバック)。
-# 受け取った人は初回のみ右クリック→「開く」で Gatekeeper を通す(README 参照)。
+# 署名は secrets の自己署名証明書 ura-talk-dist(MACOS_SIGN_P12 / 同 _PASSWORD)で行う。
+# 毎リリース同じ身元になるため、利用者が付与したアクセシビリティ等の権限が
+# アプリ更新後も失効しない。secrets 未設定ならアドホック署名にフォールバックする
+# (その場合は更新のたびに権限の再付与が必要)。
+# いずれも Gatekeeper 的には未公証なので、受け取った人は初回のみ
+# 右クリック→「開く」で通す(README 参照)。
 name: release
 
 on:
@@ -22,17 +26,38 @@ jobs:
         run: cd server && npm install && npm test
       - name: クライアントのテスト
         run: go test ./internal/...
+      - name: 署名証明書をインポート(secrets 未設定ならスキップ=アドホック署名)
+        env:
+          P12_BASE64: ${{ secrets.MACOS_SIGN_P12 }}
+          P12_PASSWORD: ${{ secrets.MACOS_SIGN_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12_BASE64" ]; then
+            echo "MACOS_SIGN_P12 が未設定のためアドホック署名で続行します"
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/sign.keychain-db"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 1800 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN"
+          printf '%s' "$P12_BASE64" | base64 -d > "$RUNNER_TEMP/sign.p12"
+          security import "$RUNNER_TEMP/sign.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/sign.p12"
+          # codesign が確認プロンプトなしで秘密鍵を使えるようにする
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASS" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
       - name: 配布用 zip を作成
-        run: make dist
+        run: make dist SIGN_IDENTITY=ura-talk-dist
       - name: Release を作成して zip を添付
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: dist/ura-talk.app.zip
           generate_release_notes: true
           body: |
-            `ura-talk.app.zip` を解凍して起動してください(macOS / Apple Silicon)。
+            `ura-talk.app.zip` を解凍して使ってください(macOS / Apple Silicon)。
 
-            - 初回のみ Gatekeeper のため **右クリック →「開く」**(または `xattr -dr com.apple.quarantine ura-talk.app`)
+            - 解凍した `ura-talk.app` を**「アプリケーション」フォルダへ移動**(重要: ダウンロードフォルダのまま開くと Gatekeeper のパスランダム化でホットキーが効きません)
+            - 初回のみ Gatekeeper のため **右クリック →「開く」**(または `xattr -dr com.apple.quarantine /Applications/ura-talk.app`)
             - 起動したら**アクセシビリティ権限**を許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る
             - 設定ファイルは初回起動時に `~/.config/ura-talk/config.json` に自動生成されます(メニューの「設定ファイルを開く…」から編集できます)
             - 声も使う場合は別途 `brew install whisper-cpp` とモデルが必要です(リポジトリの README 参照)
