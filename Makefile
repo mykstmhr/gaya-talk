@@ -22,10 +22,11 @@ MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL)
 # 設定ファイルの置き場(.app はここを読む)。setup が配置し、enhance-model が model を書き換える。
 CONFIG := $(HOME)/.config/ura-talk/config.json
 
-# 署名ID。既定は安定した自己署名証明書 ura-talk-dev。
-# これで署名すると再ビルドしてもアクセシビリティ等の権限が失効しない。
-# 証明書がキーチェーンに無ければ自動でアドホック(-)にフォールバックする。
-SIGN_IDENTITY ?= ura-talk-dev
+# 署名ID。未指定ならキーチェーンにある ura-talk-dist(配布ビルドと同一の身元)→
+# ura-talk-dev の順で自動選択し、どちらも無ければアドホック(-)にフォールバックする。
+# 配布と同じ身元で署名しておくと、ローカルビルドと配布版を行き来しても
+# アクセシビリティ等の権限がバッティングしない(TCC はバンドルID+署名で許可を持つ)。
+SIGN_IDENTITY ?=
 
 # 既定のセットアップ = 文字だけで参加する人向け(参加者が最も多いため)。
 # config を配置し voice.input を off にする。whisper モデルは取得しない
@@ -70,7 +71,11 @@ app: build ## .app を生成して署名する
 	cp build/Info.plist $(APP)/Contents/Info.plist
 	cp build/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	@id="$(SIGN_IDENTITY)"; \
-	if ! security find-identity -p codesigning 2>/dev/null | grep -q "$$id"; then \
+	if [ -z "$$id" ]; then \
+	  if security find-identity -p codesigning 2>/dev/null | grep -q "ura-talk-dist"; then id="ura-talk-dist"; \
+	  elif security find-identity -p codesigning 2>/dev/null | grep -q "ura-talk-dev"; then id="ura-talk-dev"; \
+	  else echo "署名証明書が無いためアドホック署名にフォールバックします"; id="-"; fi; \
+	elif [ "$$id" != "-" ] && ! security find-identity -p codesigning 2>/dev/null | grep -q "$$id"; then \
 	  echo "署名ID '$$id' がキーチェーンに無いためアドホック署名にフォールバックします"; id="-"; \
 	fi; \
 	codesign --force --sign "$$id" --identifier com.mykstmhr.uratalk $(APP); \
