@@ -129,7 +129,11 @@ void inputbarToggle(void) {
                                             sf.origin.y + 88, kBarW, kBarH)
                          display:NO];
         }
-        [gBar.panel makeKeyAndOrderFront:nil];
+        // makeKeyAndOrderFront は非アクティブなアプリからだと画面に出ないことがある
+        // (isVisible=YES になるのに表示されない)。voicebar と同じく、非アクティブでも
+        // 前面に出す orderFrontRegardless で出してからキーウィンドウにする。
+        [gBar.panel orderFrontRegardless];
+        [gBar.panel makeKeyWindow];
         [gBar.panel makeFirstResponder:gBar.field];
         inputbarGoShown(); // 音声リッスンとの排他制御に使う(表示されたことを Go 側へ通知)
     });
