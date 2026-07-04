@@ -74,6 +74,10 @@ static void inputbarCreate(void) {
     p.backgroundColor = [NSColor clearColor];
     p.hasShadow = YES;
     p.level = NSScreenSaverWindowLevel;
+    // NSPanel は既定 hidesOnDeactivate=YES で、アプリが非アクティブだとパネルが出ない
+    // (voicebar と同じ罠)。ura-talk は常駐の背景アプリでほぼ常に非アクティブなので切る。
+    // これが無いと「アプリをクリックした直後だけ入力バーが出る」という不可解な挙動になる。
+    p.hidesOnDeactivate = NO;
     p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
         | NSWindowCollectionBehaviorFullScreenAuxiliary;
     p.sharingType = NSWindowSharingNone; // 入力途中の文面を画面共有に映さない
