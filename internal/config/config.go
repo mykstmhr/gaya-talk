@@ -209,7 +209,7 @@ func Load() (*Config, error) {
 			},
 		},
 		Whisper: WhisperConfig{Bin: "whisper-cli", Language: "ja", BeamSize: 5},
-		Enhance: EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://localhost:11434", Model: "qwen2.5:3b"},
+		Enhance: EnhanceConfig{Enabled: true, Backend: "ollama", Endpoint: "http://127.0.0.1:11477", Model: "qwen2.5:3b"},
 		Emoji:   EmojiConfig{Mode: "off"},
 	}
 

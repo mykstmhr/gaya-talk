@@ -59,14 +59,15 @@ func (e *Enhancer) active() bool {
 
 // Enhancer は整形クライアント。
 type Enhancer struct {
-	cfg  Config
-	http *http.Client
+	cfg     Config
+	http    *http.Client
+	managed bool // 専用ポートの Ollama を管理している(終了時に止める)か
 }
 
 // New は Enhancer を生成する。
 func New(cfg Config) *Enhancer {
 	if cfg.Endpoint == "" {
-		cfg.Endpoint = "http://localhost:11434"
+		cfg.Endpoint = "http://127.0.0.1:11477"
 	}
 	if strings.TrimSpace(cfg.Prompt) == "" {
 		cfg.Prompt = defaultPrompt
@@ -121,12 +122,17 @@ func (e *Enhancer) EnsureServer(ctx context.Context) (started bool, err error) {
 	if !e.active() {
 		return false, nil
 	}
+	dedicated := !strings.HasSuffix(endpointHostPort(e.cfg.Endpoint), ":11434")
 	if e.reachable(ctx) {
-		return false, nil // 既に起動している
+		// 専用ポートで既に動いているものは前回(クラッシュ等)の ura-talk の残骸なので、
+		// 引き取って終了時に止める対象にする(専用ポートは ura-talk しか使わない前提)。
+		e.managed = dedicated
+		return false, nil
 	}
-	if err := startOllama(); err != nil {
+	if err := e.startServer(); err != nil {
 		return false, err
 	}
+	e.managed = dedicated
 	// 起動して応答するまで待つ(最大 ~15 秒)。
 	for i := 0; i < 30; i++ {
 		select {
@@ -141,23 +147,74 @@ func (e *Enhancer) EnsureServer(ctx context.Context) (started bool, err error) {
 	return true, fmt.Errorf("Ollama を起動しましたが応答しません")
 }
 
-// startOllama は Ollama サーバを起動する。Ollama.app があればそれを(ログはファイルへ)、
-// 無ければ `ollama serve` を出力破棄で起動する(ターミナルを汚さない)。
-func startOllama() error {
-	if _, err := os.Stat("/Applications/Ollama.app"); err == nil {
-		if err := exec.Command("open", "-a", "Ollama").Run(); err == nil {
-			return nil
+// startServer は Ollama サーバを endpoint のポートで起動する。
+//
+// 既定の 11434 のとき: ユーザーが他アプリと共有している標準インスタンスなので、
+// Ollama.app があればそれを開き、無ければ切り離して起動して残す(所有しない)。
+// 専用ポート(既定 11477 等)のとき: ura-talk 専用インスタンスとして OLLAMA_HOST を
+// 指定して子プロセスで起動し、所有する(StopServer / アプリ終了時に止める)。
+func (e *Enhancer) startServer() error {
+	hostPort := endpointHostPort(e.cfg.Endpoint)
+	shared := strings.HasSuffix(hostPort, ":11434")
+
+	if shared {
+		if _, err := os.Stat("/Applications/Ollama.app"); err == nil {
+			if err := exec.Command("open", "-a", "Ollama").Run(); err == nil {
+				return nil
+			}
 		}
 	}
 	bin := ollamaBin()
 	if bin == "" {
-		return fmt.Errorf("ollama が見つかりません(brew install ollama)")
+		return fmt.Errorf("ollama が見つかりません(brew install ollama / make setup-voice)")
 	}
 	cmd := exec.Command(bin, "serve")
 	// Stdout/Stderr を nil のままにすると /dev/null に接続される(ログを捨てる)。
-	// Setpgid で ura-talk のプロセスグループから切り離し、ura-talk 終了後も残す。
+	cmd.Env = append(os.Environ(), "OLLAMA_HOST="+hostPort)
+	// どちらの場合も ura-talk のプロセスグループから切り離す(親の SIGKILL に巻き込まれて
+	// 中途半端に死なないように)。専用ポートぶんの停止は StopServer がポートから特定して行う。
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait() // ゾンビ化防止
+	return nil
+}
+
+// StopServer は管理下の専用インスタンスの Ollama を止める(アプリ終了時に呼ぶ)。
+// 専用ポートを LISTEN しているプロセスをポートから特定して SIGTERM する。
+// 共有インスタンス(11434)は管理外なので触らない。nil 安全。
+func (e *Enhancer) StopServer() error {
+	if e == nil || !e.managed {
+		return nil
+	}
+	e.managed = false
+	hp := endpointHostPort(e.cfg.Endpoint)
+	port := hp[strings.LastIndex(hp, ":")+1:]
+	out, err := exec.Command("/usr/sbin/lsof", "-ti", "tcp:"+port, "-sTCP:LISTEN").Output()
+	if err != nil || len(bytes.TrimSpace(out)) == 0 {
+		return fmt.Errorf("専用ポート %s の Ollama が見つかりません: %v", port, err)
+	}
+	for _, pidStr := range strings.Fields(string(out)) {
+		_ = exec.Command("/bin/kill", "-TERM", pidStr).Run()
+	}
+	return nil
+}
+
+// endpointHostPort は endpoint URL から "host:port" を取り出す(不明時は既定値で補う)。
+func endpointHostPort(endpoint string) string {
+	u, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return "127.0.0.1:11434"
+	}
+	host, port := u.Hostname(), u.Port()
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "11434"
+	}
+	return host + ":" + port
 }
 
 // ollamaBin は ollama 実行ファイルのパスを解決する(.app 起動時は PATH が乏しいため)。

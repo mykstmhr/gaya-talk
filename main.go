@@ -22,6 +22,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -104,7 +105,7 @@ func restartApp() {
 		return
 	}
 	log.Println("再起動します…")
-	systray.Quit()
+	quitApp()
 }
 
 // warnIfTranslocated は Gatekeeper の App Translocation(パスランダム化)下で
@@ -305,7 +306,26 @@ func startTray(dryRun bool) {
 		fmt.Fprintln(os.Stderr, "ura-talk は既に起動しています。")
 		return
 	}
+	// SIGTERM / Ctrl-C でもメニューの「終了」と同じ後始末を通す
+	// (make restart 等の pkill で専用 Ollama が孤児にならないように)。
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGTERM, os.Interrupt)
+		<-c
+		quitApp()
+	}()
 	systray.Run(onReady(dryRun), func() { os.Exit(0) })
+}
+
+// quitApp は後始末をしてからアプリを終了する。すべての終了経路はここを通ること。
+// macOS の systray.Quit は NSApp terminate で即プロセスが死に、systray.Run の
+// 終了コールバックまで戻ってこないため、Quit の「前」に後始末する必要がある。
+func quitApp() {
+	// 管理下(専用ポート)の Ollama は道連れにする(共有インスタンスは触らない)。
+	if err := enhancer.StopServer(); err != nil {
+		log.Printf("⚠️ 専用 Ollama の停止に失敗: %v", err)
+	}
+	systray.Quit()
 }
 
 // onReady はメニューバーアイコンとメニューを用意し、本体処理を別 goroutine で開始する。
@@ -337,7 +357,7 @@ func onReady(dryRun bool) func() {
 		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
 		go func() {
 			<-mQuit.ClickedCh
-			systray.Quit()
+			quitApp()
 		}()
 
 		go serve(dryRun)
