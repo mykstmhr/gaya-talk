@@ -58,6 +58,7 @@ jobs:
 
             ```sh
             gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir /tmp --clobber \
+              && { pkill -x ura-talk 2>/dev/null; sleep 1; rm -rf /Applications/ura-talk.app; } \
               && ditto -x -k /tmp/ura-talk.app.zip /Applications \
               && open /Applications/ura-talk.app
             ```

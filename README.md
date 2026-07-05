@@ -26,9 +26,12 @@
 
 ```sh
 gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir /tmp --clobber \
+  && { pkill -x ura-talk 2>/dev/null; sleep 1; rm -rf /Applications/ura-talk.app; } \
   && ditto -x -k /tmp/ura-talk.app.zip /Applications \
   && open /Applications/ura-talk.app
 ```
+
+(起動中でも安全に入れ替わる。同じパス・同じ署名なので付与済みの権限も引き継がれる)
 
 (`gh` が無ければ `brew install gh && gh auth login`。private repo のためブラウザ・curl では要認証)
 
