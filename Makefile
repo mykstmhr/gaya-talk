@@ -22,6 +22,10 @@ MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL)
 # 設定ファイルの置き場(.app はここを読む)。setup が配置し、enhance-model が model を書き換える。
 CONFIG := $(HOME)/.config/ura-talk/config.json
 
+# 整形用 Ollama の ura-talk 専用ホスト:ポート(config の enhance.endpoint と揃える)。
+# アプリが自動起動し、アプリ終了時に一緒に停止する。他アプリの Ollama(11434)とは干渉しない。
+OLLAMA_HOST_DEDICATED := 127.0.0.1:11477
+
 # 署名ID。未指定ならキーチェーンにある ura-talk-dist(配布ビルドと同一の身元)→
 # ura-talk-dev の順で自動選択し、どちらも無ければアドホック(-)にフォールバックする。
 # 配布と同じ身元で署名しておくと、ローカルビルドと配布版を行き来しても
@@ -43,8 +47,11 @@ setup: ## 初回セットアップ(文字だけで参加。config 配置・voice
 	fi
 	@echo "次: make app-open → アクセシビリティを許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼る"
 
-# 音声入力も使う人向け: config を配置し、whisper モデルを選んで取得する。
-setup-voice: ## 音声も使うセットアップ(config 配置 + whisper モデルを選んで取得)
+# 音声入力も使う人向けのフルセットアップ。app 版(zip 配布)だけ使っていた人が
+# 声も使いたくなったら、リポジトリを clone してこれを叩けば全部揃う。
+setup-voice: ## 音声のフルセットアップ(whisper/ollama 導入 + モデル取得 + config 反映 + 再起動)
+	@command -v whisper-cli >/dev/null 2>&1 || { echo "→ whisper-cpp をインストールします"; brew install whisper-cpp; }
+	@command -v ollama >/dev/null 2>&1 || [ -d /Applications/Ollama.app ] || { echo "→ ollama をインストールします"; brew install ollama; }
 	@mkdir -p $(dir $(CONFIG))
 	@if [ -f "$(CONFIG)" ]; then \
 	  echo "既にあります(上書きしません): $(CONFIG)"; \
@@ -52,7 +59,20 @@ setup-voice: ## 音声も使うセットアップ(config 配置 + whisper モデ
 	  cp config.example.json "$(CONFIG)"; \
 	  echo "配置しました: $(CONFIG)(必要に応じ編集)"; \
 	fi
+	@# 旧デフォルトの endpoint(共有 11434)のままなら専用ポートへ移行する(カスタム値は触らない)
+	@sed -i '' 's|"endpoint": *"http://localhost:11434"|"endpoint": "http://$(OLLAMA_HOST_DEDICATED)"|' "$(CONFIG)" 2>/dev/null || true
 	@$(MAKE) whisper-model
+	@$(MAKE) enhance-model
+	@if pgrep -x ura-talk >/dev/null 2>&1; then \
+	  pkill -x ura-talk; sleep 1; \
+	  if [ -d /Applications/ura-talk.app ]; then open /Applications/ura-talk.app; \
+	  elif [ -d $(APP) ]; then open $(APP); fi; \
+	  echo "✅ 音声セットアップ完了。アプリを再起動しました。"; \
+	elif [ -d /Applications/ura-talk.app ]; then \
+	  open /Applications/ura-talk.app; echo "✅ 音声セットアップ完了。アプリを起動しました。"; \
+	else \
+	  echo "✅ 音声セットアップ完了。次: make app-open"; \
+	fi
 
 build: ## バイナリをビルド(bin/ura-talk)
 	go build $(LDFLAGS) -o bin/ura-talk .
@@ -184,7 +204,13 @@ enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config
 	  *) m=qwen2.5:3b ;; \
 	esac; \
 	echo "→ $$m をダウンロードします"; \
-	ollama pull "$$m" || { echo "pull に失敗。Ollama が起動しているか確認してください(ollama serve / Ollama.app)"; exit 1; }; \
+	tmp=""; \
+	if ! curl -sf "http://$(OLLAMA_HOST_DEDICATED)/api/version" >/dev/null 2>&1; then \
+	  OLLAMA_HOST=$(OLLAMA_HOST_DEDICATED) ollama serve >/dev/null 2>&1 & tmp=$$!; sleep 2; \
+	fi; \
+	OLLAMA_HOST=$(OLLAMA_HOST_DEDICATED) ollama pull "$$m"; rc=$$?; \
+	[ -n "$$tmp" ] && kill $$tmp 2>/dev/null; \
+	[ $$rc -eq 0 ] || { echo "pull に失敗しました"; exit 1; }; \
 	if [ -f "$(CONFIG)" ]; then \
 	  sed -i '' "/\"enhance\": *{/,/}/ s/\"model\": *\"[^\"]*\"/\"model\": \"$$m\"/" "$(CONFIG)"; \
 	  echo "✅ enhance.model を $$m に更新: $(CONFIG)"; \
