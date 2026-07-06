@@ -93,7 +93,8 @@ cd server && npm test                                    # 中継サーバ(vites
 ## 構成
 
 ```
-main.go                          サブコマンド(run/dryrun/devices/keys/overlay-demo)・メニューバー常駐・PTT/VAD ループ
+main.go                          サブコマンド(run/dryrun/devices/keys/overlay-demo/version)・メニューバー常駐・PTT/VAD ループ
+selfupdate.go                    バージョン表示(メニュー・ログ)とリリース版の自己アップデート(gh 経由)
 room_ui.go                       ルームのメニュー配線・送受信(作成/参加/退出/無効化・URLコピー・表示名・Slack記録の配線)
 internal/config/config.go        設定の読み込み・検証(JSONC)
 internal/recorder/recorder.go    マイク録音 (malgo)。バッファ録音とストリーム録音

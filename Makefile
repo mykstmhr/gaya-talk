@@ -9,8 +9,15 @@ help: ## このヘルプを表示する
 	grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | sort | \
 	awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-# cgo の -lobjc 重複によるリンカ警告(無害)を抑止する。
-LDFLAGS := -ldflags=-extldflags=-Wl,-no_warn_duplicate_libraries
+# バージョン情報をバイナリに埋め込む(メニュー・ログ・`ura-talk version` で表示)。
+# BUILD_VERSION: ローカルは git describe(例 v0.2.4-3-gc42e34d-dirty)。CI のリリース
+# ビルドはタグを明示的に渡す(shallow checkout では describe できないため)。
+# BUILD_KIND: "local"(既定)/ "release"(release.yml が渡す。自己アップデートの有効化条件)。
+BUILD_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+BUILD_KIND ?= local
+
+# -extldflags は cgo の -lobjc 重複によるリンカ警告(無害)の抑止。
+LDFLAGS := -ldflags "-X main.version=$(BUILD_VERSION) -X main.buildKind=$(BUILD_KIND) -extldflags=-Wl,-no_warn_duplicate_libraries"
 
 APP := build/ura-talk.app
 

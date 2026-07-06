@@ -174,8 +174,10 @@ func main() {
 		runKeys()
 	case "overlay-demo":
 		runOverlayDemo()
+	case "version":
+		fmt.Println("ura-talk " + versionString())
 	default:
-		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [run|dryrun|devices|keys|overlay-demo]\n", cmd)
+		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [run|dryrun|devices|keys|overlay-demo|version]\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -338,7 +340,7 @@ func quitApp() {
 func onReady(dryRun bool) func() {
 	return func() {
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
-		systray.SetTooltip("ura-talk")
+		systray.SetTooltip("ura-talk " + version)
 
 		// 主軸のルーム操作を最上部に(serve から Show する)。
 		addRoomMenuItems()
@@ -346,6 +348,8 @@ func onReady(dryRun bool) func() {
 		systray.AddSeparator()
 		// キー情報は下部に 1 行だけ(内容は serve で確定して Show する)。
 		mInfoKeys = newInfoItem()
+		// 何が起動しているか(バージョン・リリース版/ローカルビルド)を常に見えるように。
+		addVersionMenuItems()
 		addNameMenuItem()
 		mOpenConfig := systray.AddMenuItem("設定ファイルを開く…", "設定(config.json)をテキストエディタで開く。変更の反映は「再起動」")
 		go func() {
@@ -535,6 +539,8 @@ func acquireSingleInstance() bool {
 // serve は本体処理:設定読込→送り先決定→録音・ホットキー→常駐ループ。
 // systray のメインループ上(別 goroutine)で動く。dryRun のときは送らず表示のみ。
 func serve(dryRun bool) {
+	// 「どのビルドが動いているか」を調査の起点にできるよう、必ずログの先頭付近に残す。
+	log.Printf("ura-talk %s 起動", versionString())
 	warnIfTranslocated()
 	ensureDefaultConfig()
 	cfg, err := config.Load()
