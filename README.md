@@ -116,6 +116,41 @@ make restart
 - 翻訳・加筆を禁止するプロンプトで整形。**失敗時は生テキストをそのまま流す**ので壊れない
 - **`endpoint` には発話本文が送られる**。既定(`enhance.allow_remote: false`)では `localhost` 以外の `endpoint` を拒否し、発話が外部に流出しないようにする
 
+## アンインストール
+
+リポジトリを clone していれば `make uninstall`(下記 1〜5 を確認プロンプト付きで実行)。手動なら:
+
+**先に**: 自分が作成したルームが残っていれば、メニューの「このルームを無効化…」で閉鎖しておく(アンインストールで管理シークレットが消えると、**そのルームは二度と無効化できなくなる**)。
+
+```sh
+# 1. アプリを終了(専用 Ollama も一緒に止まる)して本体を削除
+pkill -x ura-talk 2>/dev/null; sleep 1
+rm -rf /Applications/ura-talk.app
+
+# 2. 設定と whisper モデル(Slack トークンを書いていた場合もここごと消える)
+rm -rf ~/.config/ura-talk
+
+# 3. 内部データ(表示名・ルーム管理シークレット・多重起動ロック)
+rm -rf ~/Library/"Application Support"/ura-talk
+
+# 4. ログ
+rm -f ~/Library/Logs/ura-talk.log
+
+# 5. 付与した権限(アクセシビリティ・マイク)の登録を削除
+tccutil reset Accessibility com.mykstmhr.uratalk
+tccutil reset Microphone com.mykstmhr.uratalk
+```
+
+必要に応じて(**他のアプリでも使っていないか確認してから**):
+
+```sh
+ollama rm qwen2.5:3b                 # 整形用に pull した LLM モデル(選んだものに読み替え)
+brew uninstall whisper-cpp ollama    # setup-voice で入れた場合のみ
+launchctl unsetenv URATALK_ROOM_SERVER  # launchctl setenv で設定していた場合のみ
+```
+
+clone してビルドしていた人は、リポジトリの `bin/` `build/ura-talk.app` `dist/` も `make clean` かディレクトリごと削除。一時ファイル(`$TMPDIR/ura-talk-*.wav`)は再起動で消えるが、すぐ消したければ `rm -f "$TMPDIR"/ura-talk-*.wav`。
+
 ---
 
 もっと知りたい人へ: [ホストガイド](docs/hosting.md)(ルーム作成・無効化・Slack 記録)/ [開発者ガイド](docs/development.md)(ビルド・配布・アーキテクチャ・設定リファレンス)/ [設計と経緯](docs/room-overlay-design.md)

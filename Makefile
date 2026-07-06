@@ -1,4 +1,4 @@
-.PHONY: help build clean setup setup-voice app app-open dist release model whisper-model enhance-model restart logs deploy icons
+.PHONY: help build clean setup setup-voice app app-open dist release model whisper-model enhance-model restart logs deploy icons uninstall
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -268,3 +268,23 @@ deploy: ## 中継サーバを Cloudflare にデプロイ(テスト → wrangler 
 
 clean: ## ビルド成果物を削除する
 	rm -rf bin $(APP)
+
+# アプリと関連データを削除する(README「アンインストール」の 1〜5 と同じ)。
+# brew パッケージ(whisper-cpp / ollama / gh)と ollama のモデルは他アプリと共有の
+# 可能性があるため触らない(必要なら README の任意手順を参照)。
+uninstall: ## アプリ・設定・モデル・内部データ・ログ・権限登録を削除する
+	@echo "以下を削除します:"
+	@echo "  /Applications/ura-talk.app と $(APP)"
+	@echo "  ~/.config/ura-talk(config と whisper モデル)"
+	@echo "  ~/Library/Application Support/ura-talk(表示名・ルーム管理シークレット)"
+	@echo "  ~/Library/Logs/ura-talk.log と 権限登録(アクセシビリティ/マイク)"
+	@echo "⚠️ 自分が作成したルームは管理シークレットが消えると二度と無効化できません。"
+	@printf "よろしいですか? [y/N]: "; read ans; case "$$ans" in y|Y|yes) ;; *) echo "中止しました。"; exit 1 ;; esac
+	@pkill -x ura-talk 2>/dev/null || true; sleep 1
+	@rm -rf /Applications/ura-talk.app $(APP) bin
+	@rm -rf "$(HOME)/.config/ura-talk"
+	@rm -rf "$(HOME)/Library/Application Support/ura-talk"
+	@rm -f "$(HOME)/Library/Logs/ura-talk.log"
+	@tccutil reset Accessibility com.mykstmhr.uratalk >/dev/null 2>&1 || true
+	@tccutil reset Microphone com.mykstmhr.uratalk >/dev/null 2>&1 || true
+	@echo "✅ アンインストールしました。ollama のモデルや brew パッケージも消す場合は README の「アンインストール」を参照。"
