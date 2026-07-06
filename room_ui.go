@@ -311,30 +311,15 @@ func sendRoomComment(text string) error {
 
 // seenIDs は表示済みコメント ID(重複排除用)。ローカル表示とサーバエコーの二重や、
 // 万一の再配信を防ぐ。エントリは一定時間で掃除する。
-var (
-	seenMu  sync.Mutex
-	seenIDs = map[string]time.Time{}
-)
+var seenIDs = room.NewDeduper(5 * time.Minute)
 
 // displayComment は重複を除いてコメントをオーバーレイに流す(ミラー有効なら Slack へも)。
 func displayComment(p room.Payload) {
-	if p.ID != "" {
-		seenMu.Lock()
-		if _, dup := seenIDs[p.ID]; dup {
-			seenMu.Unlock()
-			if os.Getenv("URATALK_DEBUG") != "" {
-				log.Printf("重複コメントをスキップ: id=%s", p.ID)
-			}
-			return
+	if seenIDs.Seen(p.ID) {
+		if os.Getenv("URATALK_DEBUG") != "" {
+			log.Printf("重複コメントをスキップ: id=%s", p.ID)
 		}
-		now := time.Now()
-		seenIDs[p.ID] = now
-		for id, at := range seenIDs { // 小規模なので毎回全走査で十分
-			if now.Sub(at) > 5*time.Minute {
-				delete(seenIDs, id)
-			}
-		}
-		seenMu.Unlock()
+		return
 	}
 	text := p.Text
 	if p.Name != "" {

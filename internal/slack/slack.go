@@ -21,13 +21,14 @@ var escaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // Client は chat.postMessage 用クライアント(bot token)。
 type Client struct {
-	token string
-	http  *http.Client
+	token   string
+	http    *http.Client
+	baseURL string // テストで差し替える(既定 https://slack.com)
 }
 
 // New はクライアントを生成する。token は bot token(xoxb)。
 func New(token string) *Client {
-	return &Client{token: token, http: &http.Client{Timeout: 10 * time.Second}}
+	return &Client{token: token, http: &http.Client{Timeout: 10 * time.Second}, baseURL: "https://slack.com"}
 }
 
 // PostMessage は channel に text を投稿する。threadTS が非空ならそのスレッドに返信する。
@@ -42,7 +43,7 @@ func (c *Client) PostMessage(ctx context.Context, channel, text, threadTS string
 		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://slack.com/api/chat.postMessage", bytes.NewReader(payload))
+		c.baseURL+"/api/chat.postMessage", bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
@@ -54,6 +55,15 @@ func (c *Client) PostMessage(ctx context.Context, channel, text, threadTS string
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	// 非 200(429 等)はボディが JSON とは限らないため、デコード前に判定して
+	// 「レスポンス解析失敗」ではなく原因の分かるエラーにする。
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			return "", fmt.Errorf("slack: レートリミット(HTTP 429, Retry-After: %s 秒)", resp.Header.Get("Retry-After"))
+		}
+		return "", fmt.Errorf("slack: HTTP %d", resp.StatusCode)
+	}
 
 	var out struct {
 		OK    bool   `json:"ok"`

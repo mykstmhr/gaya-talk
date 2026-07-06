@@ -130,12 +130,10 @@ func TestClientGivesUpOnGone(t *testing.T) {
 		t.Fatal("OnFatal が呼ばれない")
 	}
 	// 退出済み(再接続ループが止まっている)こと。
+	// 注: 「その後リクエストが増えない」の sleep 検証はしない。バックオフの最小値
+	// (1 秒 ×0.75)より短い待ちでは絶対に失敗せず実効性がないため、Room() == nil
+	// (leaveIf 済み = run が return 済み)の確認で代える。
 	waitUntil(t, func() bool { return c.Room() == nil })
-	n := hits.Load()
-	time.Sleep(300 * time.Millisecond) // 再試行していればこの間にリクエストが増える
-	if got := hits.Load(); got != n {
-		t.Errorf("410 後も再接続している(%d → %d 回)", n, got)
-	}
 }
 
 // TestClientRetriesOnServerError は一時的なエラー(5xx)では諦めずに

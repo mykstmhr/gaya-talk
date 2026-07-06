@@ -2,6 +2,10 @@ package enhance
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -102,5 +106,73 @@ func TestEnsureLocalOrAllowed_LocalPasses(t *testing.T) {
 	e := New(Config{Enabled: true, Model: "x", Endpoint: "http://localhost:11434"})
 	if err := e.ensureLocalOrAllowed(); err != nil {
 		t.Errorf("ローカル endpoint は常に許可すべき: %v", err)
+	}
+}
+
+// fakeOllama は /api/chat に固定の content を返す Ollama の代役を立てる。
+// httptest は 127.0.0.1 で立つのでローカル限定ガードも通る。
+func fakeOllama(t *testing.T, content string) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			t.Errorf("予期しないパス: %s", r.URL.Path)
+		}
+		var req struct {
+			Stream bool `json:"stream"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		if req.Stream {
+			t.Error("stream=false で呼ぶべき")
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"message": map[string]string{"content": content},
+		})
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestEnhance_Success(t *testing.T) {
+	ts := fakeOllama(t, "これ、うまく動くのかな?")
+	e := New(Config{Enabled: true, Model: "qwen2.5:3b", Endpoint: ts.URL})
+	got, err := e.Enhance(context.Background(), "あー、えーっと これうまく動くのかな")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "これ、うまく動くのかな?" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestEnhance_TrimsWhitespace(t *testing.T) {
+	ts := fakeOllama(t, "  整形結果です。\n")
+	e := New(Config{Enabled: true, Model: "m", Endpoint: ts.URL})
+	got, err := e.Enhance(context.Background(), "整形結果です")
+	if err != nil || got != "整形結果です。" {
+		t.Errorf("got %q err=%v", got, err)
+	}
+}
+
+func TestEnhance_DiscardsTooLongOutput(t *testing.T) {
+	// 会話化(質問に答えてしまった)出力は破棄して生テキストを使う統合動作。
+	ts := fakeOllama(t, strings.Repeat("はい、使えます。", 20))
+	e := New(Config{Enabled: true, Model: "m", Endpoint: ts.URL})
+	raw := "うまく使えるかな。"
+	got, err := e.Enhance(context.Background(), raw)
+	if got != raw {
+		t.Errorf("会話化出力は破棄して raw を返すべき: got %q", got)
+	}
+	if err == nil {
+		t.Error("破棄した理由を err で返すべき")
+	}
+}
+
+func TestEnhance_EmptyOutputFallsBack(t *testing.T) {
+	ts := fakeOllama(t, "   ")
+	e := New(Config{Enabled: true, Model: "m", Endpoint: ts.URL})
+	raw := "そのままのテキスト"
+	got, err := e.Enhance(context.Background(), raw)
+	if got != raw || err == nil {
+		t.Errorf("空の整形結果は raw + err を返すべき: got %q err=%v", got, err)
 	}
 }
