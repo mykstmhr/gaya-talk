@@ -1,6 +1,6 @@
 //go:build darwin
 
-// Package overlay はニコニコ動画風の「流れるコメント」を画面全体に重ねて表示する。
+// Package overlay はライブコメントを画面全体に重ね、右から左へスクロールさせて表示する。
 //
 // 方式: 背景透明・クリック貫通・最前面の NSWindow を接続中の全モニターに置き、
 // コメントごとにテキストを画像化した CALayer を Core Animation で右から左へ流す
@@ -113,7 +113,7 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (!gWins || gWins.count == 0 || text.length == 0) return;
 
-		// 白フチではなく黒フチ+塗り(strokeWidth 負値)でニコニコ風の視認性を出す。
+		// 白フチではなく黒フチ+塗り(strokeWidth 負値)で、明るい背景の上でも読める視認性を出す。
 		NSDictionary *attrs = @{
 			NSFontAttributeName: [NSFont boldSystemFontOfSize:kFontSize],
 			NSForegroundColorAttributeName: [NSColor colorWithSRGBRed:r green:g blue:b alpha:1],

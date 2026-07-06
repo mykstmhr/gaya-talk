@@ -101,7 +101,7 @@ internal/vad/vad.go              音声ストリームを無音で発話単位�
 internal/transcribe/whisper.go   whisper-cli 呼び出し(ローカル STT)・ノイズ除去
 internal/enhance/enhance.go      文字起こしをローカル LLM(Ollama)で整形・絵文字付与(任意)
 internal/room/                   ルーム: 共有 URL・E2E 暗号化(AES-GCM)・自動再接続つき WS クライアント
-internal/overlay/                ニコニコ風オーバーレイ(透過・クリック貫通・全モニター・画面共有に映らない)
+internal/overlay/                ライブコメントオーバーレイ(透過・クリック貫通・全モニター・画面共有に映らない)
 internal/inputbar/               Spotlight 風の文字入力バー(非アクティブ化パネル)
 internal/voicebar/               リッスン/録音中の状態バー(音量メーター。画面共有に映らない)
 internal/trayicon/               メニューバーの状態アイコン(build/genicons.swift で生成)

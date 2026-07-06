@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// Config はアプリ全体の設定。発話・入力はニコニコ風オーバーレイに流れ、
+// Config はアプリ全体の設定。発話・入力はライブコメントとしてオーバーレイに流れ、
 // ルーム(中継サーバ)を介してメンバーと共有できる。
 type Config struct {
 	// room(オーバーレイ共有)の設定。
@@ -113,7 +113,7 @@ func (m *VoiceMode) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// RoomConfig は room(ニコニコ風オーバーレイ共有)の設定。
+// RoomConfig は room(ライブコメントオーバーレイ共有)の設定。
 type RoomConfig struct {
 	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://ura-talk-room.<name>.workers.dev"。
 	// 空でもオーバーレイ自体は動く(ルーム未参加=自分の画面にだけ流れるソロモード)。

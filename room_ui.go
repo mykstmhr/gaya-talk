@@ -1,4 +1,4 @@
-// room(ニコニコ風オーバーレイ共有)のメニュー配線と送受信。
+// room(ライブコメントオーバーレイ共有)のメニュー配線と送受信。
 // serve から setupRoom で初期化される(dryRun 時を除く)。
 package main
 
@@ -29,7 +29,7 @@ import (
 var roomClient = &room.Client{}
 
 // myColor は自分のコメント色。起動ごとにランダムに選ぶ。匿名でも
-// 同一人物の発言は色で追える(ニコニコの流儀)。
+// 同一人物の発言は色で追える。
 var myColor string
 
 // commentPalette は黒フチ+暗背景の上で読みやすい明色だけを集めた色候補。
