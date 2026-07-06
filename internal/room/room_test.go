@@ -36,6 +36,9 @@ func TestURLRoundTrip(t *testing.T) {
 }
 
 func TestParseRejectsBadURLs(t *testing.T) {
+	key, _ := GenerateKey()
+	k := (&Room{Server: "https://example.com", Token: "abcdefghijKLMNOPQRST12", Key: key}).URL()
+	k = k[strings.Index(k, "#k=")+3:] // 有効な鍵の base64url 表現
 	for _, raw := range []string{
 		"",
 		"not a url",
@@ -43,9 +46,40 @@ func TestParseRejectsBadURLs(t *testing.T) {
 		"https://example.com/r/abcdefghijKLMNOPQRST12",               // 鍵なし
 		"https://example.com/r/abcdefghijKLMNOPQRST12#k=dG9vc2hvcnQ", // 鍵が短い
 		"ftp://example.com/r/abcdefghijKLMNOPQRST12#k=x",
+		// http は localhost 限定(平文 WS でトークンが盗聴できてしまうため)
+		"http://example.com/r/abcdefghijKLMNOPQRST12#k=" + k,
+		// 細工された Slack チャンネル指定は弾く
+		"https://example.com/r/abcdefghijKLMNOPQRST12#k=" + k + "&slack=" + "C0123%20evil",
 	} {
 		if _, err := Parse(raw); err == nil {
 			t.Errorf("Parse(%q) がエラーにならない", raw)
+		}
+	}
+}
+
+func TestParseAllowsLocalhostHTTP(t *testing.T) {
+	// wrangler dev 用に localhost の http だけは許す。
+	key, _ := GenerateKey()
+	u := (&Room{Server: "http://localhost:8787", Token: "abcdefghijKLMNOPQRST12", Key: key}).URL()
+	r, err := Parse(u)
+	if err != nil {
+		t.Fatalf("Parse(%q): %v", u, err)
+	}
+	if !strings.HasPrefix(r.WSURL(), "ws://localhost:8787/") {
+		t.Errorf("WSURL = %s", r.WSURL())
+	}
+}
+
+func TestValidSlackChannel(t *testing.T) {
+	for s, want := range map[string]bool{
+		"C0123ABCD": true,
+		"#general":  true,
+		"":          false,
+		"C0123 x":   false,
+		"<script>":  false,
+	} {
+		if got := ValidSlackChannel(s); got != want {
+			t.Errorf("ValidSlackChannel(%q) = %v, want %v", s, got, want)
 		}
 	}
 }

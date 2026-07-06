@@ -25,9 +25,9 @@
 **いちばん簡単なのはターミナルで 1 コマンド**(ビルド不要。`gh`([GitHub CLI](https://cli.github.com/))でダウンロードすると quarantine が付かず、Gatekeeper の警告も出ない。インストールとアップデートが同じコマンド):
 
 ```sh
-gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir /tmp --clobber \
+d="$(mktemp -d)" && gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir "$d" \
   && { pkill -x ura-talk 2>/dev/null; sleep 1; rm -rf /Applications/ura-talk.app; } \
-  && ditto -x -k /tmp/ura-talk.app.zip /Applications \
+  && ditto -x -k "$d/ura-talk.app.zip" /Applications \
   && open /Applications/ura-talk.app
 ```
 

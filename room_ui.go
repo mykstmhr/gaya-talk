@@ -297,7 +297,7 @@ func copyCurrentRoomURL() {
 // sendRoomComment はコメントをルームへ流す。表示は全員分をサーバのエコーで
 // 揃えるため自分では描画せず、未参加・切断中だけ自分の画面へ直接流す(ソロモード)。
 func sendRoomComment(text string) error {
-	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor}
+	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor, SentAt: time.Now().UnixMilli()}
 	if r := roomClient.Room(); r != nil && r.Named {
 		p.Name = currentDisplayName() // 作成/参加時に確定済み
 	}
@@ -339,18 +339,28 @@ func toggleSlackMirror(cfg *config.Config) {
 		stopMirror()
 		return
 	}
-	startMirror(cfg, roomClient.Room())
+	startMirror(cfg, roomClient.Room(), true)
 }
 
 // startMirror は参加中ルームの記録先チャンネルへの転送を開始する(親メッセージを 1 本立てる)。
 // チャンネルはルーム(URL)由来。記録対象でない・トークンが無いルームでは何もしない。
-func startMirror(cfg *config.Config, r *room.Room) {
+// confirm は開始前に投稿先チャンネルを確認ダイアログで明示するか。URL 由来のチャンネルは
+// 細工され得る(bot が招待済みの別チャンネルへ吸い出される)ため、手動開始では true にする。
+// 作成者の自動開始(自分でチャンネルを入力した直後)は false でよい。
+func startMirror(cfg *config.Config, r *room.Room, confirm bool) {
 	if r == nil || r.SlackChannel == "" {
 		log.Println("⚠️ このルームは Slack 記録対象ではありません(作成時にチャンネルを指定してください)。")
 		return
 	}
 	if strings.TrimSpace(cfg.Room.SlackBotToken) == "" {
 		log.Println("⚠️ Slack bot token が未設定のため記録できません。")
+		return
+	}
+	if confirm && !dialog.Confirm("Slack に記録",
+		"このルームのコメントを Slack チャンネル「"+r.SlackChannel+"」へ記録します。\n\n"+
+			"チャンネルはルームの URL(作成者)由来です。心当たりのないチャンネルなら中止してください。",
+		"記録を開始") {
+		log.Println("Slack 記録の開始を中止しました。")
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -415,6 +425,11 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 		if ok {
 			channel = strings.TrimSpace(entered)
 		}
+		if channel != "" && !room.ValidSlackChannel(channel) {
+			// 参加側の Parse も同じ規則で検証するため、不正な値のまま URL に載せない。
+			log.Printf("⚠️ Slack チャンネル指定 %q が不正なため記録なしで作成します(ID \"C0123…\" か \"#name\" の形式)。", channel)
+			channel = ""
+		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -446,8 +461,9 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 	}
 	roomClient.Join(r)
 	// 作成者は記録先を指定していれば自動でミラーを開始する(他のトークン保持者は手動)。
+	// チャンネルはたった今自分で入力した値なので確認ダイアログは出さない。
 	if channel != "" {
-		startMirror(cfg, r)
+		startMirror(cfg, r, false)
 	}
 }
 

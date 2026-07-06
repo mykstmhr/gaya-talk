@@ -70,3 +70,20 @@ void dialogAlert(const char *title, const char *message, const char *okLabel) {
         [alert release];
     });
 }
+
+// dialogConfirm は OK/キャンセルの確認ダイアログを出し、OK なら 1 を返す。
+// どのスレッドから呼んでもよい(メインへ同期ディスパッチ)。
+int dialogConfirm(const char *title, const char *message, const char *okLabel) {
+    __block int ok = 0;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        NSAlert *alert = [[NSAlert alloc] init];
+        alert.messageText = [NSString stringWithUTF8String:title ?: ""];
+        alert.informativeText = [NSString stringWithUTF8String:message ?: ""];
+        [alert addButtonWithTitle:[NSString stringWithUTF8String:okLabel ?: "OK"]];
+        [alert addButtonWithTitle:@"キャンセル"];
+        [NSApp activateIgnoringOtherApps:YES];
+        if ([alert runModal] == NSAlertFirstButtonReturn) ok = 1;
+        [alert release];
+    });
+    return ok;
+}

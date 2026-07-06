@@ -292,6 +292,14 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, r *Room) {
 		if err != nil || p.Text == "" {
 			continue
 		}
+		// リプレイ対策: 送信時刻が古すぎる(または未来すぎる)暗号文は捨てる。
+		// ID の重複排除は 5 分で忘れるため、それより後の再送はこちらで防ぐ。
+		// SentAt=0(旧クライアント)は検査しない。窓は時計ずれを見込んで ±2 分。
+		if p.SentAt != 0 {
+			if d := time.Since(time.UnixMilli(p.SentAt)); d > 2*time.Minute || d < -2*time.Minute {
+				continue
+			}
+		}
 		if c.OnMessage != nil {
 			c.OnMessage(p)
 		}

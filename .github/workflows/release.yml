@@ -58,11 +58,12 @@ jobs:
             macOS (Apple Silicon) 用です。**ターミナルで 1 コマンドが簡単**(`gh` 経由なら Gatekeeper の警告が出ません。アップデートも同じコマンド):
 
             ```sh
-            gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir /tmp --clobber \
+            d="$(mktemp -d)" && gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir "$d" \
               && { pkill -x ura-talk 2>/dev/null; sleep 1; rm -rf /Applications/ura-talk.app; } \
-              && ditto -x -k /tmp/ura-talk.app.zip /Applications \
+              && ditto -x -k "$d/ura-talk.app.zip" /Applications \
               && open /Applications/ura-talk.app
             ```
+            (このコマンドは README のものと同一です。変更するときは両方更新してください)
 
             ブラウザでダウンロードした場合は、解凍した `ura-talk.app` を**「アプリケーション」フォルダへ移動**してから開いてください(ダウンロードフォルダのまま開くとホットキーが効きません)。「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通せます。
 

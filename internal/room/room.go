@@ -73,6 +73,15 @@ func Parse(raw string) (*Room, error) {
 	if u.Scheme != "https" && u.Scheme != "http" {
 		return nil, fmt.Errorf("https の URL を指定してください")
 	}
+	if u.Scheme == "http" {
+		// http はローカル開発(wrangler dev)用の抜け道。任意ホストへの平文 WS を許すと
+		// ルームトークン(接続能力)が経路上で盗聴できてしまうため localhost に限定する。
+		switch u.Hostname() {
+		case "localhost", "127.0.0.1", "::1":
+		default:
+			return nil, fmt.Errorf("http の URL は localhost だけ使えます(通常は https の URL を指定してください)")
+		}
+	}
 	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
 	if len(parts) != 2 || parts[0] != "r" || !tokenRe.MatchString(parts[1]) {
 		return nil, fmt.Errorf("ルーム URL ではありません(/r/<token> の形式)")
@@ -85,13 +94,30 @@ func Parse(raw string) (*Room, error) {
 	if err != nil || len(key) != 32 {
 		return nil, fmt.Errorf("URL に有効な鍵(#k=...)がありません")
 	}
+	// Slack チャンネルは URL 由来(= 参加者全員が作成者を信頼する前提の値)なので、
+	// 少なくとも形式だけは検証して細工された値を弾く。投稿先の最終確認は
+	// ミラー開始時のダイアログが担う。
+	channel := frag.Get("slack")
+	if channel != "" && !slackChannelRe.MatchString(channel) {
+		return nil, fmt.Errorf("URL の Slack チャンネル指定(&slack=)が不正です: %q", channel)
+	}
 	return &Room{
 		Server:       u.Scheme + "://" + u.Host,
 		Token:        parts[1],
 		Key:          key,
 		Named:        frag.Get("n") == "1",
-		SlackChannel: frag.Get("slack"),
+		SlackChannel: channel,
 	}, nil
+}
+
+// slackChannelRe は Slack チャンネルの指定として妥当な形("C0123…" の ID または
+// "#name" 形式)。config の slack_channel コメントで案内している形と揃える。
+var slackChannelRe = regexp.MustCompile(`^#?[A-Za-z0-9_-]+$`)
+
+// ValidSlackChannel は s が Slack チャンネル指定として妥当な形かを返す
+// (ルーム作成時の入力検証用。Parse の検証と同じ規則)。
+func ValidSlackChannel(s string) bool {
+	return slackChannelRe.MatchString(s)
 }
 
 // Payload は復号後のコメント 1 件。
@@ -100,6 +126,10 @@ type Payload struct {
 	Text  string `json:"text"`
 	Color string `json:"color"`          // "#rrggbb"
 	Name  string `json:"name,omitempty"` // 記名モード用(v1 では常に空)
+	// SentAt は送信時刻(unix ミリ秒)。受信側が古すぎる暗号文の再送(リプレイ)を
+	// 捨てるのに使う(重複排除の TTL より長く経ってからの再送対策)。
+	// 0(旧クライアント)は検査しない。
+	SentAt int64 `json:"sent_at,omitempty"`
 }
 
 // NewID は Payload.ID 用のランダム ID を返す。

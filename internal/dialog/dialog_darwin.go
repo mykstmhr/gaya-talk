@@ -9,6 +9,7 @@ package dialog
 char* dialogPrompt(const char *title, const char *message, const char *placeholder,
                    const char *initial, const char *okLabel);
 void dialogAlert(const char *title, const char *message, const char *okLabel);
+int dialogConfirm(const char *title, const char *message, const char *okLabel);
 */
 import "C"
 
@@ -35,6 +36,20 @@ func Prompt(title, message, placeholder, initial, okLabel string) (string, bool)
 	}
 	defer C.free(unsafe.Pointer(res))
 	return C.GoString(res), true
+}
+
+// Confirm は OK/キャンセルの確認ダイアログを出し、OK なら true を返す。
+// 閉じられるまでブロックする(AppKit のメインループが動いていること)。
+func Confirm(title, message, okLabel string) bool {
+	ct := C.CString(title)
+	cm := C.CString(message)
+	co := C.CString(okLabel)
+	defer func() {
+		C.free(unsafe.Pointer(ct))
+		C.free(unsafe.Pointer(cm))
+		C.free(unsafe.Pointer(co))
+	}()
+	return C.dialogConfirm(ct, cm, co) == 1
 }
 
 // Alert は入力欄なしの警告ダイアログを出す(OK のみ)。閉じられるまでブロックする。
