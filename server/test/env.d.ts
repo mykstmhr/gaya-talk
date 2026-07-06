@@ -1,7 +1,10 @@
-// vitest-pool-workers の cloudflare:test が返す env に wrangler.jsonc の
-// バインディング(ROOM など)の型を付ける。
-import type { Env } from "../src/index";
+// vitest-pool-workers の cloudflare:test が返す env は Cloudflare.Env 型
+// (workers-types が宣言する空インターフェース)なので、wrangler.jsonc の
+// バインディング(ROOM など)の型を declaration merging で足す。
+import type { Env as WorkerEnv } from "../src/index";
 
-declare module "cloudflare:test" {
-  interface ProvidedEnv extends Env {}
+declare global {
+  namespace Cloudflare {
+    interface Env extends WorkerEnv {}
+  }
 }

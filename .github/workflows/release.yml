@@ -23,7 +23,8 @@ jobs:
         with:
           go-version-file: go.mod
       - name: サーバのテスト
-        run: cd server && npm install && npm test
+        # npm ci でロックファイルどおりに入れる(リリースの再現性 + lock との不整合検出)
+        run: cd server && npm ci && npm test
       - name: クライアントのテスト
         run: go test ./internal/...
       - name: 署名証明書をインポート(secrets 未設定ならスキップ=アドホック署名)

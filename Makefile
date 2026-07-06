@@ -224,7 +224,7 @@ enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config
 # 注意: ルームのライフサイクル変更を含むデプロイでは、既存ルームの URL が無効になる
 # ことがある(デプロイ後に作り直して配り直す)。
 deploy: ## 中継サーバを Cloudflare にデプロイ(テスト → wrangler deploy)
-	@cd server && { [ -d node_modules ] || npm install; }
+	@cd server && { [ -d node_modules ] || npm ci; }
 	@cd server && npm test
 	@cd server && npx wrangler deploy
 	@echo "✅ デプロイしました。config の room.server が上の URL と一致しているか確認してください。"
