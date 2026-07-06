@@ -55,8 +55,9 @@ var (
 // addRoomMenuItems はメニュー項目を(隠したまま)作る。onReady から呼ぶ。
 // 上段=今のルームに対する操作、下段=別ルームへの入り口、で区切る。
 func addRoomMenuItems() {
-	mRoomState = systray.AddMenuItem("ルーム : 未参加", "現在のルーム接続状態")
-	mRoomState.Disable()
+	// 状態行はグレーアウトさせず(Disable しない)、色付き絵文字で一目で分かるようにする。
+	// クリックしても何も起きない情報行(ClickedCh は誰も読まない)。
+	mRoomState = systray.AddMenuItem("⚪ ルーム : 未参加", "現在のルーム接続状態")
 	mRoomState.Hide()
 	mRoomCopyURL = systray.AddMenuItem("このルームの URL をコピー", "今参加しているルームの共有 URL をクリップボードへ(後から来る人を招く)")
 	mRoomCopyURL.Hide()
@@ -650,15 +651,17 @@ func setRoomState(s room.State) {
 	if !joined {
 		stopMirror() // 切断されたら記録も止める
 	}
+	// 状態は色付き絵文字で示す(🟢=参加中 / 🟡=接続中 / ⚪=未参加)。
+	// 絵文字はメニュー項目でもフルカラーで描画されるので、一目で判別できる。
 	switch s {
 	case room.StateConnected:
-		mRoomState.SetTitle("ルーム : 参加中" + id)
+		mRoomState.SetTitle("🟢 ルーム : 参加中" + id)
 		mRoomLeave.Enable()
 	case room.StateConnecting:
-		mRoomState.SetTitle("ルーム : 接続中…" + id)
+		mRoomState.SetTitle("🟡 ルーム : 接続中…" + id)
 		mRoomLeave.Enable()
 	default:
-		mRoomState.SetTitle("ルーム : 未参加(ソロモード)")
+		mRoomState.SetTitle("⚪ ルーム : 未参加(ソロモード)")
 		mRoomLeave.Disable()
 	}
 }
