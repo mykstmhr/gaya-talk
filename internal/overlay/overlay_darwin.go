@@ -7,7 +7,7 @@
 // (会議ウィンドウがどのモニターにあっても見えるよう、同じコメントが全画面に流れる)。
 // アニメーションは GPU 合成なので常駐しても CPU をほぼ使わない。
 // ウィンドウは sharingType=None にしてあり、画面共有・収録には映らない
-// (裏トークが会議の相手に見えてしまわないための安全弁)。
+// (コメントが会議の相手に見えてしまわないための安全弁)。
 //
 // モニターの抜き差しには自動で追従する(増えたぶんは追加、減ったぶんは伏せる)。
 // 追従しないと、外したモニターのウィンドウを macOS が残りの画面へ移動させ、
@@ -52,7 +52,7 @@ static NSWindow* overlayBuildWindow(void) {
 	w.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
 		| NSWindowCollectionBehaviorFullScreenAuxiliary
 		| NSWindowCollectionBehaviorStationary;
-	// 画面共有・スクリーンショットに映さない(裏トークを会議相手に見せない)。
+	// 画面共有・スクリーンショットに映さない(コメントを会議相手に見せない)。
 	w.sharingType = NSWindowSharingNone;
 	w.releasedWhenClosed = NO;
 	NSView *v = [[NSView alloc] initWithFrame:w.frame];
