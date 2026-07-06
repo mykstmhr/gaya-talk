@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -59,9 +60,12 @@ func (e *Enhancer) active() bool {
 
 // Enhancer は整形クライアント。
 type Enhancer struct {
-	cfg     Config
-	http    *http.Client
-	managed bool // 専用ポートの Ollama を管理している(終了時に止める)か
+	cfg  Config
+	http *http.Client
+	// managed は専用ポートの Ollama を管理している(終了時に止める)か。
+	// EnsureServer(serve goroutine)が書き、StopServer(終了経路の別 goroutine)が
+	// 読むため atomic にする。
+	managed atomic.Bool
 }
 
 // New は Enhancer を生成する。
@@ -126,13 +130,13 @@ func (e *Enhancer) EnsureServer(ctx context.Context) (started bool, err error) {
 	if e.reachable(ctx) {
 		// 専用ポートで既に動いているものは前回(クラッシュ等)の ura-talk の残骸なので、
 		// 引き取って終了時に止める対象にする(専用ポートは ura-talk しか使わない前提)。
-		e.managed = dedicated
+		e.managed.Store(dedicated)
 		return false, nil
 	}
 	if err := e.startServer(); err != nil {
 		return false, err
 	}
-	e.managed = dedicated
+	e.managed.Store(dedicated)
 	// 起動して応答するまで待つ(最大 ~15 秒)。
 	for i := 0; i < 30; i++ {
 		select {
@@ -185,17 +189,21 @@ func (e *Enhancer) startServer() error {
 // 専用ポートを LISTEN しているプロセスをポートから特定して SIGTERM する。
 // 共有インスタンス(11434)は管理外なので触らない。nil 安全。
 func (e *Enhancer) StopServer() error {
-	if e == nil || !e.managed {
+	if e == nil || !e.managed.Swap(false) {
 		return nil
 	}
-	e.managed = false
 	hp := endpointHostPort(e.cfg.Endpoint)
 	port := hp[strings.LastIndex(hp, ":")+1:]
 	out, err := exec.Command("/usr/sbin/lsof", "-ti", "tcp:"+port, "-sTCP:LISTEN").Output()
 	if err != nil || len(bytes.TrimSpace(out)) == 0 {
-		return fmt.Errorf("専用ポート %s の Ollama が見つかりません: %v", port, err)
+		return nil // 既に終了している(lsof は該当なしでも非 0 を返す)。失敗ではない
 	}
 	for _, pidStr := range strings.Fields(string(out)) {
+		// 万一、専用ポートを別プロセスが使っていた場合に誤って殺さないよう名前を確認する。
+		name, err := exec.Command("/bin/ps", "-o", "comm=", "-p", pidStr).Output()
+		if err != nil || !strings.Contains(strings.ToLower(string(name)), "ollama") {
+			continue
+		}
 		_ = exec.Command("/bin/kill", "-TERM", pidStr).Run()
 	}
 	return nil

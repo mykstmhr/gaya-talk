@@ -27,6 +27,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -298,8 +299,10 @@ var lockFile *os.File
 // 状態(待機/聞き取り…)はメニューには出さず、アイコン色・画面下部のバー・ツールチップが担う。
 var mInfoKeys *systray.MenuItem
 
-// enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化。
-var enhancer *enhance.Enhancer
+// enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化する。
+// serve goroutine が書き、quitApp(シグナル/メニューの goroutine)が読むため atomic。
+// Load() が返す nil は enhance 側の各メソッドが安全に扱う。
+var enhancer atomic.Pointer[enhance.Enhancer]
 
 // startTray はメニューバー常駐(systray)を起動する。systray が NSApplication の
 // メインループを回し、その中でホットキー登録・録音・文字起こしを動かす。
@@ -325,7 +328,7 @@ func startTray(dryRun bool) {
 // 終了コールバックまで戻ってこないため、Quit の「前」に後始末する必要がある。
 func quitApp() {
 	// 管理下(専用ポート)の Ollama は道連れにする(共有インスタンスは触らない)。
-	if err := enhancer.StopServer(); err != nil {
+	if err := enhancer.Load().StopServer(); err != nil {
 		log.Printf("⚠️ 専用 Ollama の停止に失敗: %v", err)
 	}
 	systray.Quit()
@@ -536,7 +539,11 @@ func serve(dryRun bool) {
 	ensureDefaultConfig()
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("設定エラー: %v", err)
+		// log.Fatalf(os.Exit)は使わない: すべての終了経路は quitApp を通す規約
+		// (専用 Ollama の後始末等)。以下の致命エラーも同様。
+		log.Printf("⛔ 設定エラー: %v", err)
+		quitApp()
+		return
 	}
 	tray.setConfig(cfg)
 
@@ -620,7 +627,7 @@ func serve(dryRun bool) {
 	out := buildSink(cfg, dryRun)
 
 	// 文字起こし整形/絵文字付与(ローカル LLM)。無効でも New は安全。
-	enhancer = enhance.New(enhance.Config{
+	enh := enhance.New(enhance.Config{
 		Enabled:     cfg.Enhance.Enabled,
 		Endpoint:    cfg.Enhance.Endpoint,
 		Model:       cfg.Enhance.Model,
@@ -628,12 +635,13 @@ func serve(dryRun bool) {
 		EmojiMode:   cfg.Emoji.Mode,
 		AllowRemote: cfg.Enhance.AllowRemote,
 	})
+	enhancer.Store(enh)
 	// 整形か絵文字のどちらかが有効なら Ollama を用意する。
 	llmNeeded := cfg.Enhance.Enabled || (cfg.Emoji.Mode != "" && cfg.Emoji.Mode != "off")
 	if llmNeeded {
 		// Ollama が起動していなければ自動起動する(出力は破棄)。
 		ictx, icancel := context.WithTimeout(context.Background(), 20*time.Second)
-		if started, err := enhancer.EnsureServer(ictx); err != nil {
+		if started, err := enh.EnsureServer(ictx); err != nil {
 			log.Printf("⚠️ Ollama を起動できませんでした: %v", err)
 		} else if started {
 			log.Println("Ollama を自動起動しました")
@@ -641,7 +649,7 @@ func serve(dryRun bool) {
 		icancel()
 
 		cctx, ccancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := enhancer.Check(cctx); err != nil {
+		if err := enh.Check(cctx); err != nil {
 			log.Printf("⚠️ Ollama が使えません: %v → 整形/絵文字はスキップします", err)
 		} else {
 			log.Printf("✅ Ollama 有効: model=%s endpoint=%s(整形=%v / 絵文字=%s)",
@@ -650,7 +658,7 @@ func serve(dryRun bool) {
 			go func() {
 				wctx, wcancel := context.WithTimeout(context.Background(), 60*time.Second)
 				defer wcancel()
-				if err := enhancer.Warmup(wctx); err != nil {
+				if err := enh.Warmup(wctx); err != nil {
 					log.Printf("整形モデルのウォームアップ失敗(初回は遅くなる可能性): %v", err)
 				} else {
 					log.Println("整形モデルをウォームアップしました(初回から高速)")
@@ -667,7 +675,9 @@ func serve(dryRun bool) {
 
 	rec, err := recorder.New(cfg.Voice.Device)
 	if err != nil {
-		log.Fatalf("録音初期化エラー: %v", err)
+		log.Printf("⛔ 録音初期化エラー: %v", err)
+		quitApp()
+		return
 	}
 	defer rec.Close()
 
@@ -682,7 +692,9 @@ func serve(dryRun bool) {
 
 	down, up, stopTrigger, err := buildTrigger(cfg.Voice.Hotkey)
 	if err != nil {
-		log.Fatalf("ホットキー設定エラー: %v", err)
+		log.Printf("⛔ ホットキー設定エラー: %v", err)
+		quitApp()
+		return
 	}
 	defer stopTrigger()
 
@@ -998,12 +1010,20 @@ func bodyForLog(s string) string {
 	return fmt.Sprintf("(%d文字)", len([]rune(s)))
 }
 
+// transcribeSem は whisper-cli の同時実行数を絞る(遅いマシンで VAD がセグメントを
+// 連発すると、プロセスが積み上がってさらに遅くなる悪循環を防ぐ)。待っている発話は
+// 順番に処理される(録音・VAD 側は止めないので取りこぼしはない)。
+var transcribeSem = make(chan struct{}, 2)
+
 // handle は 1 回の発話(PCM)を正規化・文字起こしして送り先へ渡す。
 // out.send が nil のときは送らず、文字起こし結果を表示するだけ(ドライラン)。
 func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
-	// 文字起こし中はアイコンを「💬」にし、終わったら基本状態へ戻す。
+	// 文字起こし中はアイコンを「💬」にし、終わったら基本状態へ戻す
+	// (待ちの間も件数バッジに載せて、詰まっていることが見えるようにする)。
 	tray.beginTranscribe()
 	defer tray.endTranscribe()
+	transcribeSem <- struct{}{}
+	defer func() { <-transcribeSem }()
 
 	// 小声・ボソボソ対策: Whisper に渡す前に音量を持ち上げる。
 	if cfg.Voice.Gain.Enabled {
@@ -1022,7 +1042,7 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 	// ローカル LLM で整形(無効/失敗時は元テキストのまま)。何が起きたかをログに出す。
 	if cfg.Enhance.Enabled {
 		ectx, ecancel := context.WithTimeout(context.Background(), 30*time.Second)
-		enhanced, eerr := enhancer.Enhance(ectx, text)
+		enhanced, eerr := enhancer.Load().Enhance(ectx, text)
 		ecancel()
 		switch {
 		case eerr != nil:
@@ -1041,7 +1061,7 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 	// 絵文字モード: 本文は変えず、内容に合う絵文字を末尾に付ける(off なら何もしない)。
 	if cfg.Emoji.Mode != "" && cfg.Emoji.Mode != "off" {
 		emctx, emcancel := context.WithTimeout(context.Background(), 15*time.Second)
-		em, eerr := enhancer.Emoji(emctx, text)
+		em, eerr := enhancer.Load().Emoji(emctx, text)
 		emcancel()
 		switch {
 		case eerr != nil:

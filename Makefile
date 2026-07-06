@@ -1,4 +1,4 @@
-.PHONY: help build clean setup setup-voice app app-open dist model whisper-model enhance-model restart logs deploy icons
+.PHONY: help build clean setup setup-voice app app-open dist release model whisper-model enhance-model restart logs deploy icons
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -126,6 +126,7 @@ release: ## GitHub Release を作る(make release VERSION=v1.2.3)
 	  exit 1; \
 	fi
 	@case "$(VERSION)" in v[0-9]*) ;; *) echo "⚠️ VERSION は v から始めてください(例 v1.2.3)"; exit 1 ;; esac
+	@[ "$$(git branch --show-current)" = "main" ] || { echo "⚠️ main 以外のブランチです(push でローカルの古い main が飛ぶため中止)。"; exit 1; }
 	@[ -z "$$(git status --porcelain)" ] || { echo "⚠️ 未コミットの変更があります。コミットしてから release してください。"; exit 1; }
 	@go test ./internal/... > /dev/null || { echo "⚠️ テストが失敗しました。"; exit 1; }
 	@git tag -a "$(VERSION)" -m "$(VERSION)"
@@ -135,10 +136,13 @@ release: ## GitHub Release を作る(make release VERSION=v1.2.3)
 
 # 起動中の ura-talk を停止して開き直す(config 変更の反映など)。
 # -x はプロセス名で完全一致するので、pkill 自身のシェル行を誤爆しない。
+# 開き直す .app は /Applications 優先(gh release で入れた人が大半)、無ければローカルビルド。
 restart: ## 起動中の .app を停止して開き直す(config 変更の反映。再ビルドはしない)
 	@pkill -x ura-talk 2>/dev/null || true
 	@sleep 1
-	@open $(APP)
+	@if [ -d /Applications/ura-talk.app ]; then open /Applications/ura-talk.app; \
+	elif [ -d $(APP) ]; then open $(APP); \
+	else echo "⚠️ ura-talk.app が見つかりません(/Applications にも $(APP) にも無い)。README のインストールか make app-open を先に。"; exit 1; fi
 	@echo "再起動しました(ログ: ~/Library/Logs/ura-talk.log)"
 
 # .app 起動時のログ(~/Library/Logs/ura-talk.log)を追尾する。
@@ -189,9 +193,12 @@ whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	fi
 
 # 整形用の LLM(Ollama)モデルを選んで pull し、config の enhance.model に反映する。
+# CLI が PATH に無くても Ollama.app 同梱の CLI で動かす(setup-voice の判定と揃える)。
 enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config も更新)
-	@command -v ollama >/dev/null 2>&1 || { echo "ollama が必要です: brew install ollama"; exit 1; }
-	@echo "整形に使う Ollama モデルを選んでください(数字を入力):"; \
+	@ollama="$$(command -v ollama || true)"; \
+	[ -n "$$ollama" ] || { [ -x /Applications/Ollama.app/Contents/Resources/ollama ] && ollama=/Applications/Ollama.app/Contents/Resources/ollama; }; \
+	[ -n "$$ollama" ] || { echo "ollama が必要です: brew install ollama"; exit 1; }; \
+	echo "整形に使う Ollama モデルを選んでください(数字を入力):"; \
 	echo "  1) qwen2.5:7b    高品質・遅め(ロード~15s)"; \
 	echo "  2) qwen2.5:3b    バランス(おすすめ)"; \
 	echo "  3) qwen2.5:1.5b  最速・軽量"; \
@@ -206,9 +213,9 @@ enhance-model: ## 整形用の Ollama モデルを番号で選んで pull(config
 	echo "→ $$m をダウンロードします"; \
 	tmp=""; \
 	if ! curl -sf "http://$(OLLAMA_HOST_DEDICATED)/api/version" >/dev/null 2>&1; then \
-	  OLLAMA_HOST=$(OLLAMA_HOST_DEDICATED) ollama serve >/dev/null 2>&1 & tmp=$$!; sleep 2; \
+	  OLLAMA_HOST=$(OLLAMA_HOST_DEDICATED) "$$ollama" serve >/dev/null 2>&1 & tmp=$$!; sleep 2; \
 	fi; \
-	OLLAMA_HOST=$(OLLAMA_HOST_DEDICATED) ollama pull "$$m"; rc=$$?; \
+	OLLAMA_HOST=$(OLLAMA_HOST_DEDICATED) "$$ollama" pull "$$m"; rc=$$?; \
 	[ -n "$$tmp" ] && kill $$tmp 2>/dev/null; \
 	[ $$rc -eq 0 ] || { echo "pull に失敗しました"; exit 1; }; \
 	if [ -f "$(CONFIG)" ]; then \

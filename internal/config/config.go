@@ -218,7 +218,9 @@ func Load() (*Config, error) {
 
 	path := Path()
 	if path != "" {
-		if data, err := os.ReadFile(path); err == nil && len(strings.TrimSpace(string(data))) > 0 {
+		data, err := os.ReadFile(path)
+		switch {
+		case err == nil && len(strings.TrimSpace(string(data))) > 0:
 			// JSONC(コメント・末尾カンマ)を許可するため、素の JSON へ落としてから読む。
 			plain, err := migrateLegacy(stripJSONC(data))
 			if err != nil {
@@ -227,6 +229,10 @@ func Load() (*Config, error) {
 			if err := json.Unmarshal(plain, cfg); err != nil {
 				return nil, fmt.Errorf("設定ファイル %s のパースに失敗: %w", path, err)
 			}
+		case err != nil && !os.IsNotExist(err):
+			// 未存在はデフォルトで動く(初回起動)が、権限エラー等を黙殺すると
+			// 「設定が効かない」原因に気づけないため、エラーにする。
+			return nil, fmt.Errorf("設定ファイル %s を読めません: %w", path, err)
 		}
 	}
 
