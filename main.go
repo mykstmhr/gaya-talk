@@ -61,12 +61,15 @@ func ensureDefaultConfig() {
 		return
 	}
 	if _, err := os.Stat(path); err == nil {
+		// 以前の 0o644 で生成されたファイルに備え、所有者のみへ絞る(ログと同じ遡及パターン)。
+		_ = os.Chmod(path, 0o600)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}
-	if err := os.WriteFile(path, exampleConfig, 0o644); err != nil {
+	// 後から room.slack_bot_token 等の秘密を書き込むファイルなので所有者のみ。
+	if err := os.WriteFile(path, exampleConfig, 0o600); err != nil {
 		log.Printf("設定ファイルの生成に失敗: %v", err)
 		return
 	}

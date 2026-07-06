@@ -121,7 +121,10 @@ type Client struct {
 	room   *Room
 	conn   *websocket.Conn
 	cancel context.CancelFunc
-	state  State
+	// gen は参加の「世代」。Join・Leave のたびに増え、run goroutine は自分の
+	// 世代のときだけ状態を触れる(古い run が新しい参加を壊す競合の防止)。
+	gen   uint64
+	state State
 }
 
 // Join はルームへの接続を開始する(すぐ返る。接続・再接続は裏で行う)。
@@ -132,26 +135,53 @@ func (c *Client) Join(r *Room) {
 	c.mu.Lock()
 	c.room = r
 	c.cancel = cancel
+	c.gen++
+	gen := c.gen
 	c.mu.Unlock()
-	go c.run(ctx, r)
+	go c.run(ctx, r, gen)
 }
 
 // Leave はルームから退出する。未参加なら何もしない。
 func (c *Client) Leave() {
 	c.mu.Lock()
-	cancel := c.cancel
-	conn := c.conn
-	c.room = nil
-	c.cancel = nil
-	c.conn = nil
+	conn := c.teardownLocked()
 	c.mu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
 	if conn != nil {
 		conn.Close(websocket.StatusNormalClosure, "leave")
 	}
 	c.setState(StateDisconnected)
+}
+
+// leaveIf は gen が現在の世代のときだけ退出する。run の恒久エラー経路用で、
+// cancel 前の一瞬に別ルームへ Join されていた場合に、古い run が新しい参加を
+// 退出させてしまわないようにする。
+func (c *Client) leaveIf(gen uint64) {
+	c.mu.Lock()
+	if c.gen != gen {
+		c.mu.Unlock()
+		return
+	}
+	conn := c.teardownLocked()
+	c.mu.Unlock()
+	if conn != nil {
+		conn.Close(websocket.StatusNormalClosure, "leave")
+	}
+	c.setState(StateDisconnected)
+}
+
+// teardownLocked は参加状態を解除する(mu 保持中に呼ぶ)。cancel をロック内で
+// 呼ぶことで、run が「Leave の unlock 後・cancel 前」の隙間で新しい接続を保存
+// してしまう競合を塞ぐ。閉じるべき conn を返す(Close はロック外で行う)。
+func (c *Client) teardownLocked() *websocket.Conn {
+	if c.cancel != nil {
+		c.cancel()
+	}
+	conn := c.conn
+	c.room = nil
+	c.cancel = nil
+	c.conn = nil
+	c.gen++
+	return conn
 }
 
 // Room は参加中のルームを返す(未参加なら nil)。
@@ -188,10 +218,11 @@ func (c *Client) Send(p Payload) error {
 }
 
 // run は接続→受信ループ→切断時の再接続、を Leave されるまで繰り返す。
-func (c *Client) run(ctx context.Context, r *Room) {
+// gen は起動時点の世代(自分が最新の run かの判定に使う)。
+func (c *Client) run(ctx context.Context, r *Room, gen uint64) {
 	backoff := time.Second
 	for {
-		c.setState(StateConnecting)
+		c.setStateIf(gen, StateConnecting)
 		conn, resp, err := websocket.Dial(ctx, r.WSURL(), nil)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -202,7 +233,7 @@ func (c *Client) run(ctx context.Context, r *Room) {
 				if c.OnFatal != nil {
 					c.OnFatal(reason)
 				}
-				c.Leave()
+				c.leaveIf(gen)
 				return
 			}
 			log.Printf("ルーム接続失敗(%.0f 秒後に再試行): %v", backoff.Seconds(), err)
@@ -219,19 +250,19 @@ func (c *Client) run(ctx context.Context, r *Room) {
 		conn.SetReadLimit(64 << 10)
 
 		c.mu.Lock()
-		// Leave と競合した場合(cancel 済み)は保持しない。
-		if ctx.Err() != nil {
+		// Leave・別ルームへの Join と競合した場合(世代交代済み)は保持しない。
+		if ctx.Err() != nil || c.gen != gen {
 			c.mu.Unlock()
 			conn.Close(websocket.StatusNormalClosure, "leave")
 			return
 		}
 		c.conn = conn
 		c.mu.Unlock()
-		c.setState(StateConnected)
+		c.setStateIf(gen, StateConnected)
 		log.Println("✅ ルームに接続しました")
 		backoff = time.Second
 
-		c.readLoop(ctx, conn)
+		c.readLoop(ctx, conn, r)
 
 		c.mu.Lock()
 		if c.conn == conn {
@@ -246,12 +277,9 @@ func (c *Client) run(ctx context.Context, r *Room) {
 }
 
 // readLoop は受信→復号→通知を接続が切れるまで繰り返す。復号できない
-// メッセージ(鍵違い等)は黙って捨てる。
-func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) {
-	r := c.Room()
-	if r == nil {
-		return
-	}
+// メッセージ(鍵違い等)は黙って捨てる。r は run に渡されたルーム
+// (c.Room() を読み直すと、Join で差し替わった別ルームの鍵で復号しかねない)。
+func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn, r *Room) {
 	for {
 		typ, data, err := conn.Read(ctx)
 		if err != nil {
@@ -272,6 +300,23 @@ func (c *Client) readLoop(ctx context.Context, conn *websocket.Conn) {
 
 func (c *Client) setState(s State) {
 	c.mu.Lock()
+	changed := c.state != s
+	c.state = s
+	cb := c.OnState
+	c.mu.Unlock()
+	if changed && cb != nil {
+		cb(s)
+	}
+}
+
+// setStateIf は gen が現在の世代のときだけ状態を変える(古い run の遷移を無視し、
+// 「退出済みなのに参加中表示」のような巻き戻りを防ぐ)。
+func (c *Client) setStateIf(gen uint64, s State) {
+	c.mu.Lock()
+	if c.gen != gen {
+		c.mu.Unlock()
+		return
+	}
 	changed := c.state != s
 	c.state = s
 	cb := c.OnState
