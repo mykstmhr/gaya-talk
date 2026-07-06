@@ -28,7 +28,7 @@ Go 1.26.4+ が必要。Finder/`.app` 起動では作業ディレクトリが `/`
 
 起動後にアクセシビリティ権限を許可する。設定ファイルが無ければ初回起動時にコメント付きの雛形(config.example.json を埋め込んだもの)を `~/.config/ura-talk/config.json` へ自動生成し、メニューの「設定ファイルを開く…」から編集できる(反映はメニューの「再起動」)。whisper が未設定・未導入でも落ちず、文字入力のみで動く。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
 
-**GitHub Release**: `make release VERSION=v1.2.3` でタグを push すると、[release.yml](../.github/workflows/release.yml) がテスト → `make dist` → zip を Release に添付する(ローカルの未コミット変更・テスト失敗があれば release は中断される)。
+**GitHub Release**: `make release VERSION=v1.2.3` でタグを push すると、[release.yml](../.github/workflows/release.yml) がテスト → `make dist` → zip を Release に添付する(ローカルの未コミット変更・テスト失敗があれば release は中断される)。`VERSION=patch / minor / major` を渡すと直近のタグから該当の桁を 1 つ上げたバージョンを自動計算する(確認プロンプト付き。例: v0.2.4 で `patch` → v0.2.5)。
 
 Release の署名には secrets の自己署名証明書 **`ura-talk-dist`**(`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`)を使う。毎リリース同じ身元になるため、**利用者が付与した権限がアプリ更新後も失効しない**。secrets が未設定でもアドホック署名にフォールバックして Release 自体は作られる(その場合は更新のたびに権限の再付与が必要)。証明書を作り直す(=身元が変わる)と全員が権限を付与し直しになる点に注意。
 
