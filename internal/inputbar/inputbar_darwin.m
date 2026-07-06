@@ -109,6 +109,38 @@ static void inputbarCreate(void) {
     c.panel = p;
     c.field = f;
     gBar = c;
+
+    // メニューバー常駐アプリには標準の「編集」メニューが無く、Cmd+V/C/X/A が
+    // ルーティングされない(貼り付け・コピーができない)。パネル表示中だけ
+    // キーイベントを監視し、first responder(テキスト欄のフィールドエディタ)へ
+    // 直接転送する(dialog_darwin.m と同じ手法)。local monitor は自プロセスの
+    // イベントだけを見るので、他アプリの Cmd+V には影響しない。
+    [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+        handler:^NSEvent *(NSEvent *e) {
+            if (!gBar || !gBar.panel.isVisible || !gBar.panel.isKeyWindow) return e;
+            // Ctrl+Cmd+Space で絵文字パレットを開く。非アクティブな常駐アプリでは
+            // このシステムショートカットが前面アプリ側に効いてしまうため、自前で拾う
+            // (keyCode 49 = Space。挿入先は first responder = 入力バーになる)。
+            if (e.keyCode == 49 &&
+                (e.modifierFlags & NSEventModifierFlagCommand) &&
+                (e.modifierFlags & NSEventModifierFlagControl)) {
+                [NSApp orderFrontCharacterPalette:nil];
+                return nil;
+            }
+            if ((e.modifierFlags & NSEventModifierFlagCommand) &&
+                !(e.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagOption))) {
+                NSString *k = e.charactersIgnoringModifiers.lowercaseString;
+                SEL sel = NULL;
+                if ([k isEqualToString:@"v"]) sel = @selector(paste:);
+                else if ([k isEqualToString:@"c"]) sel = @selector(copy:);
+                else if ([k isEqualToString:@"x"]) sel = @selector(cut:);
+                else if ([k isEqualToString:@"a"]) sel = @selector(selectAll:);
+                if (sel && [gBar.panel.firstResponder tryToPerform:sel with:nil]) {
+                    return nil; // 消費(二重入力を防ぐ)
+                }
+            }
+            return e;
+        }];
 }
 
 void inputbarToggle(void) {
