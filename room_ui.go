@@ -20,6 +20,7 @@ import (
 	"github.com/mykstmhr/gaya-talk/internal/namestore"
 	"github.com/mykstmhr/gaya-talk/internal/overlay"
 	"github.com/mykstmhr/gaya-talk/internal/room"
+	"github.com/mykstmhr/gaya-talk/internal/roomstore"
 	"github.com/mykstmhr/gaya-talk/internal/slack"
 
 	"fyne.io/systray"
@@ -98,6 +99,12 @@ func setupRoom(cfg *config.Config) {
 	} else {
 		adminSecrets = adminstore.New("")
 	}
+	// 最後に参加していたルーム(再起動・アップデート後の自動再参加用)も同じ場所。
+	if dir, err := roomstore.DefaultDir(); err == nil {
+		lastRoom = roomstore.New(dir)
+	} else {
+		lastRoom = roomstore.New("")
+	}
 	// 表示名を初期化する。config が優先、無ければ前回入力を保存した内部ファイルから。
 	// どちらも空なら記名ルームの作成/参加時に入力を促す(macOS ユーザー名は使わない)。
 	if n := strings.TrimSpace(cfg.Room.DisplayName); n != "" {
@@ -110,7 +117,11 @@ func setupRoom(cfg *config.Config) {
 	roomClient.OnMessage = displayComment
 	roomClient.OnState = func(s room.State) { setRoomState(s) }
 	// 無効化・失効で再接続できないときは理由をオーバーレイにも出す(ログだけだと気づけない)。
-	roomClient.OnFatal = func(reason string) { overlay.Show("⛔ "+reason, "#ff6666") }
+	// このルームには二度と入れないので、次回起動時の自動再参加も止める。
+	roomClient.OnFatal = func(reason string) {
+		overlay.Show("⛔ "+reason, "#ff6666")
+		forgetLastRoom()
+	}
 
 	// 文字入力バー: 専用ホットキーでトグルし、Enter で音声と同じ経路に流す。
 	inputbar.SetOnSubmit(func(text string) {
@@ -168,6 +179,7 @@ func setupRoom(cfg *config.Config) {
 		for range mRoomLeave.ClickedCh {
 			stopMirror() // 退出したら記録も止める
 			roomClient.Leave()
+			forgetLastRoom() // 明示的な退出なので次回の自動再参加もしない
 			log.Println("ルームから退出しました。")
 		}
 	}()
@@ -195,6 +207,9 @@ func setupRoom(cfg *config.Config) {
 			}
 		}()
 	}
+
+	// 前回参加していたルームがあれば入り直す(再起動・アップデートでログインを保持)。
+	rejoinLastRoom()
 }
 
 // changeDisplayName は表示名の変更ダイアログを出し、内部ファイルに保存する。
@@ -244,6 +259,50 @@ func updateNameMenu(cfg *config.Config) {
 // setupRoom で初期化する。
 var adminSecrets *adminstore.Store
 
+// lastRoom は最後に参加していたルームの共有 URL の永続化ストア(自動再参加用)。
+// setupRoom で初期化する。
+var lastRoom *roomstore.Store
+
+// rememberLastRoom は参加したルームを保存する(再起動・アップデート後に入り直すため)。
+func rememberLastRoom(r *room.Room) {
+	if err := lastRoom.Save(r.URL()); err != nil {
+		log.Printf("参加中ルームの保存に失敗(再起動後の自動再参加は働きません): %v", err)
+	}
+}
+
+// forgetLastRoom は保存済みルームを消す(退出・無効化・失効時)。
+func forgetLastRoom() {
+	if err := lastRoom.Clear(); err != nil {
+		log.Printf("参加中ルームの記録の削除に失敗: %v", err)
+	}
+}
+
+// rejoinLastRoom は前回参加していたルームがあれば入り直す(起動時に一度だけ呼ぶ)。
+// 失効していれば OnFatal が記録を消すので、次回からは試みない。
+func rejoinLastRoom() {
+	raw := lastRoom.Load()
+	if raw == "" {
+		return
+	}
+	r, err := room.Parse(raw)
+	if err != nil {
+		log.Printf("保存されていたルーム URL を読めません(自動再参加を諦めます): %v", err)
+		forgetLastRoom()
+		return
+	}
+	// 自分が作ったルームなら管理シークレットを復元する(URL には載っていない)。
+	if e, ok := adminSecrets.Get(r.Token); ok {
+		r.AdminSecret = e.Secret
+	}
+	if r.SlackChannel != "" {
+		// 記録対象であることを起動のたびに思い出せるようにする(透明性)。
+		log.Println("🔴 このルームは Slack に記録されます。")
+		overlay.Show("🔴 このルームは Slack に記録されます", "#ff6666")
+	}
+	log.Printf("↩️ 前回のルームに再参加します(%s)。退出するにはメニューの「ルームから退出」。", truncRunes(r.Token, 8))
+	roomClient.Join(r)
+}
+
 // revokeCurrentRoom は参加中ルームを無効化する(作成者のみ)。確認のうえサーバへ
 // DELETE し、成功したら退出してシークレットを破棄する。
 func revokeCurrentRoom() {
@@ -273,6 +332,7 @@ func revokeCurrentRoom() {
 	}
 	stopMirror()
 	roomClient.Leave()
+	forgetLastRoom()
 	log.Println("✅ ルームを無効化しました(以後この URL では誰も参加できません)。")
 }
 
@@ -456,6 +516,7 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 		log.Printf("✅ %sルームを作成し、共有 URL をクリップボードへコピーしました。メンバーに共有してください。", kind)
 	}
 	roomClient.Join(r)
+	rememberLastRoom(r)
 	// 作成者は記録先を指定していれば自動でミラーを開始する(他のトークン保持者は手動)。
 	// チャンネルはたった今自分で入力した値なので確認ダイアログは出さない。
 	if channel != "" {
@@ -556,6 +617,7 @@ func joinRoomWithDialog(cfg *config.Config) {
 		overlay.Show("🔴 このルームは Slack に記録されます", "#ff6666")
 	}
 	roomClient.Join(r)
+	rememberLastRoom(r)
 }
 
 // setRoomState は接続状態をメニューへ反映する。参加中はルーム ID(トークンの先頭)も
