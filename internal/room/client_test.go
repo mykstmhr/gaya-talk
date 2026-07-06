@@ -20,7 +20,7 @@ func TestCreateParsesTokenAndAdminSecret(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	r, err := Create(context.Background(), ts.URL+"/", false, "")
+	r, err := Create(context.Background(), ts.URL+"/", false, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestCreateWithoutAdminSecret(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	r, err := Create(context.Background(), ts.URL, false, "")
+	r, err := Create(context.Background(), ts.URL, false, "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

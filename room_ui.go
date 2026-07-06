@@ -433,7 +433,7 @@ func createAndJoinRoom(cfg *config.Config, named bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	r, err := room.Create(ctx, cfg.Room.Server, named, channel)
+	r, err := room.Create(ctx, cfg.Room.Server, named, channel, strings.TrimSpace(cfg.Room.CreateSecret))
 	if err != nil {
 		log.Printf("⚠️ %v", err)
 		return

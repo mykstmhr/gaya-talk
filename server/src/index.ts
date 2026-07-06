@@ -8,6 +8,13 @@ export interface Env {
   ROOM: DurableObjectNamespace<Room>;
   /** 未アクティブなルームが失効するまでの日数(wrangler.jsonc の vars。既定 7) */
   ROOM_IDLE_TTL_DAYS?: string;
+  /**
+   * 設定すると POST /rooms に Authorization: Bearer <この値> を要求する
+   * (`wrangler secret put CREATE_SECRET` で設定)。サーバ URL は招待 URL の一部として
+   * 全参加者に見えるため、これが無いと URL を知る誰でもルームを作り放題になる。
+   * 未設定なら従来どおり無認証(自分しか URL を知らない個人運用向け)。
+   */
+  CREATE_SECRET?: string;
 }
 
 // 128bit トークンの base64url(パディングなし)表現 = 22 文字
@@ -18,6 +25,9 @@ const ROOM_PATH_RE = new RegExp(`^/r/${TOKEN}$`);
 const MAX_MESSAGE_BYTES = 16 * 1024;
 const RATE_LIMIT_WINDOW_MS = 10_000;
 const RATE_LIMIT_MAX_MESSAGES = 30;
+// 1 ルームの同時接続数の上限。ブロードキャストは O(接続数) なので、トークン保持者が
+// 接続を大量に張って DO の CPU・課金を増幅させるのを防ぐ(正規の用途には十分な数)
+const MAX_CONNECTIONS_PER_ROOM = 32;
 
 const DEFAULT_IDLE_TTL_DAYS = 7;
 // メッセージ起因の lastActive 書き込みはこの間隔まで間引く(接続時は毎回書く)
@@ -31,8 +41,10 @@ function generateToken(): string {
   return btoa(bin).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
+const ENC = new TextEncoder();
+
 async function sha256Hex(s: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  const digest = await crypto.subtle.digest("SHA-256", ENC.encode(s));
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -41,6 +53,14 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "POST" && url.pathname === "/rooms") {
+      if (env.CREATE_SECRET) {
+        const auth = request.headers.get("Authorization") ?? "";
+        const secret = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+        // ハッシュ同士を比較して、文字列比較の打ち切りタイミングから秘密が漏れないようにする
+        if (secret === "" || (await sha256Hex(secret)) !== (await sha256Hex(env.CREATE_SECRET))) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+      }
       // トークンと管理シークレットを発行し、DO を初期化して有効化する。
       // 初期化されていないトークンは接続を受け付けないので、適当な 22 文字を
       // 並べてリレーにタダ乗りすることはできない
@@ -123,9 +143,12 @@ export class Room extends DurableObject<Env> {
       return new Response("Room revoked or expired", { status: 410 });
     }
     if (now - meta.lastActive > this.idleTtlMs()) {
-      // 失効。墓標として revoked を立てて残す
-      await this.ctx.storage.put("meta", { ...meta, revoked: true } satisfies Meta);
+      // 失効。墓標を立て、繋ぎっぱなしのソケットも道連れに閉じる
+      await this.markRevoked(meta);
       return new Response("Room revoked or expired", { status: 410 });
+    }
+    if (this.ctx.getWebSockets().length >= MAX_CONNECTIONS_PER_ROOM) {
+      return new Response("Too many connections", { status: 503 });
     }
     await this.ctx.storage.put("meta", { ...meta, lastActive: now } satisfies Meta);
 
@@ -150,6 +173,13 @@ export class Room extends DurableObject<Env> {
     if (secret === "" || (await sha256Hex(secret)) !== meta.adminHash) {
       return new Response("Forbidden", { status: 403 });
     }
+    await this.markRevoked(meta);
+    return new Response(null, { status: 204 });
+  }
+
+  // 墓標(revoked)を立て、接続中の全ソケットを閉じる。管理者による無効化と
+  // TTL 失効の両方から呼ぶ(片方だけだと既存接続が中継し続けてしまう)。
+  private async markRevoked(meta: Meta): Promise<void> {
     await this.ctx.storage.put("meta", { ...meta, revoked: true } satisfies Meta);
     for (const ws of this.ctx.getWebSockets()) {
       try {
@@ -158,14 +188,30 @@ export class Room extends DurableObject<Env> {
         // すでに閉じている場合は無視
       }
     }
-    return new Response(null, { status: 204 });
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     if (typeof message !== "string") return; // バイナリは無視
-    if (new TextEncoder().encode(message).byteLength > MAX_MESSAGE_BYTES) return;
+    if (ENC.encode(message).byteLength > MAX_MESSAGE_BYTES) return;
 
     const now = Date.now();
+    // 中継前に墓標と失効を確認する。これが無いと、無効化・失効の後も
+    // 繋ぎっぱなしのソケット同士は永久に中継できてしまう
+    // (storage はメモリキャッシュされるので hot path でも安価)
+    const meta = await this.ctx.storage.get<Meta>("meta");
+    if (!meta || meta.revoked) {
+      try {
+        ws.close(1008, "room revoked");
+      } catch {
+        // すでに閉じている場合は無視
+      }
+      return;
+    }
+    if (now - meta.lastActive > this.idleTtlMs()) {
+      await this.markRevoked(meta);
+      return;
+    }
+
     const attachment = (ws.deserializeAttachment() as Attachment | null) ?? { recv: [] };
     const recv = attachment.recv.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
     if (recv.length >= RATE_LIMIT_MAX_MESSAGES) return; // 超過分は黙って捨てる
@@ -184,8 +230,7 @@ export class Room extends DurableObject<Env> {
 
     // 繋ぎっぱなしの常設ルームが「接続時刻だけ古い」せいで失効しないよう、
     // 発言でも lastActive を進める(書き込みは間引く)
-    const meta = await this.ctx.storage.get<Meta>("meta");
-    if (meta && !meta.revoked && now - meta.lastActive > ACTIVITY_WRITE_INTERVAL_MS) {
+    if (now - meta.lastActive > ACTIVITY_WRITE_INTERVAL_MS) {
       await this.ctx.storage.put("meta", { ...meta, lastActive: now } satisfies Meta);
     }
   }

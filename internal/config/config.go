@@ -118,6 +118,9 @@ type RoomConfig struct {
 	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://ura-talk-room.<name>.workers.dev"。
 	// 空でもオーバーレイ自体は動く(ルーム未参加=自分の画面にだけ流れるソロモード)。
 	Server string `json:"server"`
+	// CreateSecret はルーム作成時の認証シークレット。サーバ側で CREATE_SECRET を設定して
+	// いる場合に必要(参加だけなら不要)。環境変数 URATALK_ROOM_CREATE_SECRET でも渡せる。
+	CreateSecret string `json:"create_secret"`
 	// DisplayName は記名モードのルームで名乗る表示名(空なら記名ルームでも匿名)。
 	DisplayName string `json:"display_name"`
 	// SlackBotToken は Slack ミラー(コメントをチャンネルへ転送)に使う bot token(xoxb)。
@@ -235,6 +238,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("URATALK_SLACK_BOT_TOKEN"); v != "" {
 		cfg.Room.SlackBotToken = v
+	}
+	if v := os.Getenv("URATALK_ROOM_CREATE_SECRET"); v != "" {
+		cfg.Room.CreateSecret = v
 	}
 	cfg.Whisper.Model = expandHome(cfg.Whisper.Model)
 	return cfg, nil

@@ -21,7 +21,7 @@ func TestE2ERelay(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	r, err := Create(ctx, server, false, "")
+	r, err := Create(ctx, server, false, "", "")
 	if err != nil {
 		t.Fatalf("ルーム作成失敗: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestE2ERevoke(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	r, err := Create(ctx, server, false, "")
+	r, err := Create(ctx, server, false, "", "")
 	if err != nil {
 		t.Fatalf("ルーム作成失敗: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestE2ERevoke(t *testing.T) {
 	}
 
 	// 間違ったシークレットでは無効化できないことも実サーバで確認しておく。
-	r2, err := Create(ctx, server, false, "")
+	r2, err := Create(ctx, server, false, "", "")
 	if err != nil {
 		t.Fatalf("ルーム作成失敗: %v", err)
 	}

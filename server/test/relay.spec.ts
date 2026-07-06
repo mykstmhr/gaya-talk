@@ -1,5 +1,6 @@
 import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import worker from "../src/index";
 import type { Room } from "../src/index";
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{22}$/;
@@ -95,6 +96,36 @@ describe("POST /rooms", () => {
   });
 });
 
+describe("POST /rooms の作成認証(CREATE_SECRET)", () => {
+  // SELF の env は差し替えられないので、ハンドラを直接呼んで CREATE_SECRET を注入する
+  const withSecret = { ...env, CREATE_SECRET: "s3cret" };
+
+  function createReq(auth?: string): Request {
+    return new Request("https://example.com/rooms", {
+      method: "POST",
+      headers: auth ? { Authorization: auth } : {},
+    });
+  }
+
+  it("シークレットが一致すれば 200", async () => {
+    const res = await worker.fetch(createReq("Bearer s3cret"), withSecret);
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as Created;
+    expect(token).toMatch(TOKEN_RE);
+  });
+
+  it("欠落・不一致は 401 で、ルームは作られない", async () => {
+    expect((await worker.fetch(createReq(), withSecret)).status).toBe(401);
+    expect((await worker.fetch(createReq("Bearer wrong"), withSecret)).status).toBe(401);
+    expect((await worker.fetch(createReq("s3cret"), withSecret)).status).toBe(401); // Bearer なし
+  });
+
+  it("CREATE_SECRET 未設定なら従来どおり無認証で 200", async () => {
+    const res = await worker.fetch(createReq(), env);
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("GET /r/<token>/ws", () => {
   it("不正な token は 404", async () => {
     for (const path of [
@@ -140,6 +171,46 @@ describe("ルームの失効(未アクティブ TTL)", () => {
     const { token } = await createRoom();
     await patchMeta(token, { lastActive: Date.now() - 6 * DAY_MS });
     expect(await wsStatus(token)).toBe(101);
+  });
+
+  it("失効を検知したら接続中のソケットも閉じる", async () => {
+    const { token } = await createRoom();
+    const a = await openWs(token);
+    await patchMeta(token, { lastActive: Date.now() - 8 * DAY_MS });
+
+    // 新規の接続試行が失効を踏むと、繋ぎっぱなしの a も道連れに閉じる
+    expect(await wsStatus(token)).toBe(410);
+    await waitFor(() => a.closed());
+  });
+
+  it("失効済みルームでは既存接続のメッセージも中継されない", async () => {
+    const { token } = await createRoom();
+    const a = await openWs(token);
+    const b = await openWs(token);
+    await patchMeta(token, { revoked: true });
+
+    a.ws.send("should-not-relay");
+    await waitFor(() => a.closed()); // 送信を契機に墓標を検知して閉じられる
+    expect(b.received).toEqual([]);
+  });
+});
+
+describe("接続数上限", () => {
+  it("1 ルームの同時接続が上限に達したら 503", async () => {
+    const { token } = await createRoom();
+    const conns: Awaited<ReturnType<typeof openWs>>[] = [];
+    for (let i = 0; i < 32; i++) {
+      conns.push(await openWs(token)); // openWs 内で 101 を確認している
+    }
+    expect(await wsStatus(token)).toBe(503);
+    // 1 本閉じれば再び接続できる(サーバ側のクローズ処理は非同期なのでポーリングで待つ)
+    conns[0]!.ws.close();
+    let status = 0;
+    for (let i = 0; i < 100 && status !== 101; i++) {
+      status = await wsStatus(token);
+      if (status !== 101) await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(status).toBe(101);
   });
 });
 

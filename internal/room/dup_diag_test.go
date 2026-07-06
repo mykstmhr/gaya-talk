@@ -19,7 +19,7 @@ func TestE2ENoDuplicates(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	r, err := Create(ctx, server, false, "")
+	r, err := Create(ctx, server, false, "", "")
 	if err != nil {
 		t.Fatalf("ルーム作成失敗: %v", err)
 	}

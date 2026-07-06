@@ -16,17 +16,25 @@ import (
 // Create は中継サーバにルームを作成し、鍵をローカルで生成して Room を返す。
 // 鍵はサーバに送らない(URL フラグメント経由でメンバーにだけ渡る)。
 // slackChannel は Slack 記録対象チャンネル(空なら記録対象でない)。
-func Create(ctx context.Context, server string, named bool, slackChannel string) (*Room, error) {
+// createSecret はサーバが作成認証(CREATE_SECRET)を有効にしている場合の
+// シークレット(空なら送らない)。
+func Create(ctx context.Context, server string, named bool, slackChannel, createSecret string) (*Room, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		fmt.Sprintf("%s/rooms", trimSlash(server)), nil)
 	if err != nil {
 		return nil, err
+	}
+	if createSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+createSecret)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ルーム作成に失敗(サーバ %s に届きません): %w", server, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("ルーム作成に失敗: サーバが作成シークレットを要求しています(config の room.create_secret を設定してください)")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("ルーム作成に失敗: HTTP %d", resp.StatusCode)
 	}
