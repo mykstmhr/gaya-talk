@@ -288,7 +288,7 @@ func buildSink(cfg *config.Config, dryRun bool) output {
 	}
 	return output{
 		name: "オーバーレイ",
-		send: func(text string) error { return sendRoomComment(text) },
+		send: func(text string) error { sendRoomComment(text); return nil },
 	}
 }
 
@@ -883,24 +883,36 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 		if !voice.Allowed() {
 			log.Println("🔈 スピーカー出力中のため音声入力は無効です(イヤホンにするか voice.input を \"on\" に)。")
 			flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
+			<-up // この押下の解放を消費する(残すと次の正常な録音を即終了させてしまう)
 			continue
 		}
+		voice.DrainRevoked() // 録音していない間に来た revoke は捨てる
 		if err := rec.Start(); err != nil {
 			log.Printf("録音開始失敗: %v", err)
+			<-up // 同上
 			continue
 		}
 		log.Println("● 録音中...")
 		tray.setBase(iconRec, "● 録音中…", "録音中…")
 		playOn(cfg)
 
-		<-up
-		pcm, durMs, err := rec.Stop()
-		tray.setBase(iconIdle, "待機中…", "")
-		playOff(cfg)
-		if err != nil {
-			log.Printf("録音停止失敗: %v", err)
+		select {
+		case <-up:
+		case <-voice.Revoked():
+			// 録音中に出力がスピーカーへ変わった → 破棄して停止(vad と同じ安全側の挙動。
+			// イヤホンを外した後も相手の声を拾い続けない)。解放(up)も待って捨てる
+			// (残すと次の正常な録音を即終了させてしまう)。
+			rec.Stop()
+			tray.setBase(iconIdle, "待機中…", "")
+			playOff(cfg)
+			log.Println("🔈 出力がスピーカーに変わったため録音を中止しました。")
+			flashVoiceBar(cfg, "音声オフ(スピーカー出力中)")
+			<-up
 			continue
 		}
+		pcm, durMs := rec.Stop()
+		tray.setBase(iconIdle, "待機中…", "")
+		playOff(cfg)
 		log.Printf("録音完了 (%d ms)", durMs)
 
 		if durMs < cfg.Voice.MinDurationMs {

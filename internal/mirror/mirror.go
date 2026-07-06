@@ -26,7 +26,9 @@ type Mirror struct {
 }
 
 // Start は channel への記録を開始する。header を親メッセージとして投稿し、その ts を
-// スレッドの起点にする。既に有効なら一度止めてから開始し直す。
+// スレッドの起点にする。既に有効なら新しい channel/スレッドで上書きする(古い
+// スレッドへの転送は止まる)。投稿はロック外で行うため、並行して 2 回呼ぶと親
+// メッセージが 2 本立ち得る(呼び出し元はメニュー操作なので実質直列)。
 func (m *Mirror) Start(ctx context.Context, p Poster, channel, header string) error {
 	ts, err := p.PostMessage(ctx, channel, header, "")
 	if err != nil {

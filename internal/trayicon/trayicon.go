@@ -45,4 +45,3 @@ func tint(src []byte, c color.RGBA) []byte {
 	}
 	return buf.Bytes()
 }
-

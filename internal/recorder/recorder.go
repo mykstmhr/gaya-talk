@@ -158,15 +158,15 @@ func (r *Recorder) stopLocked() {
 
 // Stop はバッファ録音を止め、PCM バイト列と録音時間(ミリ秒)を返す。
 // 録音していなければ nil, 0 を返す。
-func (r *Recorder) Stop() ([]byte, int, error) {
+func (r *Recorder) Stop() ([]byte, int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if !r.recording {
-		return nil, 0, nil
+		return nil, 0
 	}
 	r.stopLocked()
 	pcm := append([]byte(nil), r.buf.Bytes()...)
-	return pcm, DurationMs(len(pcm)), nil
+	return pcm, DurationMs(len(pcm))
 }
 
 // StopStream はストリーム録音を止める。

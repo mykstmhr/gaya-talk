@@ -114,11 +114,7 @@ func setupRoom(cfg *config.Config) {
 
 	// 文字入力バー: 専用ホットキーでトグルし、Enter で音声と同じ経路に流す。
 	inputbar.SetOnSubmit(func(text string) {
-		go func() {
-			if err := sendRoomComment(text); err != nil {
-				log.Printf("コメント送信失敗: %v", err)
-			}
-		}()
+		go sendRoomComment(text)
 	})
 	if down, err := watchDown(cfg.InputHotkey); err != nil {
 		log.Printf("⚠️ 入力バーのホットキー(%s)を登録できません: %v", cfg.InputHotkey, err)
@@ -296,7 +292,8 @@ func copyCurrentRoomURL() {
 
 // sendRoomComment はコメントをルームへ流す。表示は全員分をサーバのエコーで
 // 揃えるため自分では描画せず、未参加・切断中だけ自分の画面へ直接流す(ソロモード)。
-func sendRoomComment(text string) error {
+// 送信失敗はローカル表示へのフォールバックで吸収するため、失敗を返さない。
+func sendRoomComment(text string) {
 	p := room.Payload{ID: room.NewID(), Text: text, Color: myColor, SentAt: time.Now().UnixMilli()}
 	if r := roomClient.Room(); r != nil && r.Named {
 		p.Name = currentDisplayName() // 作成/参加時に確定済み
@@ -306,7 +303,6 @@ func sendRoomComment(text string) error {
 		// displayComment が ID で重複排除するので、あとからエコーが来ても二重にならない。
 		displayComment(p)
 	}
-	return nil
 }
 
 // seenIDs は表示済みコメント ID(重複排除用)。ローカル表示とサーバエコーの二重や、
@@ -568,9 +564,11 @@ func setRoomState(s room.State) {
 	if mRoomState == nil {
 		return
 	}
+	// Room() は 1 回だけ読む(2 回読むと間に Leave が入って別スナップショットになる)。
+	r := roomClient.Room()
 	id := ""
 	recorded := false
-	if r := roomClient.Room(); r != nil {
+	if r != nil {
 		tag := "匿名"
 		if r.Named {
 			tag = "記名"
@@ -583,7 +581,6 @@ func setRoomState(s room.State) {
 	}
 	// URL コピーはルームに属している間は使える。Slack 記録トグルは「記録対象ルーム」でのみ。
 	// 無効化は管理シークレットを持つ作成者だけ。
-	r := roomClient.Room()
 	joined := r != nil
 	toggle(mRoomCopyURL, joined)
 	toggle(mSlackMirror, joined && recorded)

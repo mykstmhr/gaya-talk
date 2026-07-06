@@ -10,6 +10,7 @@ import "sync/atomic"
 // Gate は音声入力の可否を保持する。ゼロ値は不許可。New / NewAlwaysOn で作る。
 type Gate struct {
 	allowed atomic.Bool
+	fixed   bool          // true なら Set を無視する(常時許可の on モード用)
 	revoke  chan struct{} // 許可→不許可の遷移をリッスン中のループへ伝える
 }
 
@@ -22,7 +23,7 @@ func New(allowed bool) *Gate {
 
 // NewAlwaysOn は常に許可のゲートを返す(on モード用)。Set しても変化しない。
 func NewAlwaysOn() *Gate {
-	g := &Gate{revoke: make(chan struct{}, 1)}
+	g := &Gate{fixed: true, revoke: make(chan struct{}, 1)}
 	g.allowed.Store(true)
 	return g
 }
@@ -43,8 +44,12 @@ func (g *Gate) DrainRevoked() {
 }
 
 // Set は可否を allowed に更新し、変化したら true を返す。許可→不許可のときは
-// Revoked() に通知する(バッファ 1・非ブロッキング)。
+// Revoked() に通知する(バッファ 1・非ブロッキング)。NewAlwaysOn のゲートでは
+// 何もしない(常に false)。
 func (g *Gate) Set(allowed bool) (changed bool) {
+	if g.fixed {
+		return false
+	}
 	prev := g.allowed.Swap(allowed)
 	if prev == allowed {
 		return false
