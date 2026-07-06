@@ -134,13 +134,14 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 			pixelsHigh:(NSInteger)ceil(sz.height * scale)
 			bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
 			colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
-		if (!rep) return;
+		if (!rep) { [s release]; return; }
 		rep.size = sz;
 		[NSGraphicsContext saveGraphicsState];
 		[NSGraphicsContext setCurrentContext:
 			[NSGraphicsContext graphicsContextWithBitmapImageRep:rep]];
 		[s drawAtPoint:NSMakePoint(3, 3)];
 		[NSGraphicsContext restoreGraphicsState];
+		[s release]; // ARC なし: 描画し終えたら所有権を手放す(放置するとコメントごとにリークする)
 
 		for (NSUInteger wi = 0; wi < gWins.count; wi++) {
 			NSWindow *win = gWins[wi];
@@ -187,7 +188,8 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 			[layer addAnimation:a forKey:@"flow"];
 
 			// 流れ終わったらレイヤーを破棄する。rep をブロックに捕まえて、
-			// contents が参照するビットマップをアニメーション中ずっと生かしておく。
+			// contents が参照するビットマップをアニメーション中ずっと生かしておく
+			// (ブロックの copy が retain するので、下で alloc 分を release しても安全)。
 			dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
 				(int64_t)(((start - now) + dur + 0.5) * NSEC_PER_SEC)),
 				dispatch_get_main_queue(), ^{
@@ -195,6 +197,7 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 					(void)rep;
 				});
 		}
+		[rep release]; // ARC なし: alloc の +1 を手放す(ブロックが retain 済みなのでアニメーション中は生きる)
 	});
 }
 */

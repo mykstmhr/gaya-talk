@@ -9,8 +9,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 )
+
+// escaper は Slack の制御シーケンスを無効化する。text はルーム参加者由来なので、
+// エスケープしないと <!channel> 等で記録先チャンネル全員への通知を強制できてしまう。
+// エスケープ規則は https://api.slack.com/reference/surfaces/formatting#escaping のとおり
+// & < > の 3 文字だけでよい。
+var escaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // Client は chat.postMessage 用クライアント(bot token)。
 type Client struct {
@@ -26,7 +33,7 @@ func New(token string) *Client {
 // PostMessage は channel に text を投稿する。threadTS が非空ならそのスレッドに返信する。
 // 投稿したメッセージの ts を返す(親メッセージの ts を以降の threadTS に使う)。
 func (c *Client) PostMessage(ctx context.Context, channel, text, threadTS string) (string, error) {
-	body := map[string]any{"channel": channel, "text": text}
+	body := map[string]any{"channel": channel, "text": escaper.Replace(text)}
 	if threadTS != "" {
 		body["thread_ts"] = threadTS
 	}
