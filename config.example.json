@@ -122,6 +122,8 @@
     // enabled: true で文字起こし結果を読みやすく整形(失敗時は素のテキスト)
     "enhance": {
         "enabled": true,
+        // 整形バックエンド(現状 "ollama" のみ)
+        "backend": "ollama",
         // ura-talk 専用ポートの Ollama を自動起動して使う(アプリ終了時に一緒に停止)。
         // 他のアプリと共有している標準の Ollama を使うなら "http://localhost:11434" に
         // する(その場合はアプリ終了時も止めない)。

@@ -283,6 +283,18 @@ describe("Room ブロードキャスト", () => {
     expect(fromSender).toEqual(Array.from({ length: 30 }, (_, i) => `msg-${i}`));
   });
 
+  it("16KB を超えるメッセージは中継されない", async () => {
+    const { token } = await createRoom();
+    const sender = await openWs(token);
+    const receiver = await openWs(token);
+
+    sender.ws.send("x".repeat(16 * 1024 + 1));
+    // marker の到着をもって、先行メッセージの配送(があるなら)完了を確定させる
+    receiver.ws.send("marker");
+    await waitFor(() => receiver.received.includes("marker"));
+    expect(receiver.received).toEqual(["marker"]);
+  });
+
   it("発言すると lastActive が進む(1 時間以上空いていた場合)", async () => {
     const { token } = await createRoom();
     const a = await openWs(token);

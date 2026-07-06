@@ -9,3 +9,7 @@ build/ura-talk.app/
 
 # モデルファイル(大きいのでコミットしない)
 *.bin
+
+# ローカル環境(グローバル ignore 頼みにしない: 他の環境でも誤コミットを防ぐ)
+.DS_Store
+.envrc

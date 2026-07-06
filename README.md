@@ -80,20 +80,22 @@ make setup-voice   # whisper/ollama の導入(未導入なら)→ モデル取�
 
 ## 困ったとき
 
+以下の `ura-talk` コマンドは、zip で入れた場合は `/Applications/ura-talk.app/Contents/MacOS/ura-talk`、clone してビルドした場合は `./bin/ura-talk` に読み替える。
+
 **声が小さい・認識が悪い**(効く順):
 1. **自動ゲイン**(既定 ON)。まだ小さいなら `gain.max_gain` を `12 → 20`
-2. **VAD で拾われない**: `URATALK_DEBUG=1 ./bin/ura-talk dryrun` で喋ったときの `rms=` を見て `vad.threshold` をその少し下に
+2. **VAD で拾われない**: `URATALK_DEBUG=1 ura-talk dryrun` で喋ったときの `rms=` を見て `vad.threshold` をその少し下に
 3. **初期プロンプト** `whisper.prompt` に想定する口調・語彙(相槌など)を入れる
 
 **マイクに切り替えたのに音声が入らない**: 出力がスピーカーだと `voice.input: "auto"` は自動オフになる(メニューに「音声オフ(スピーカー出力中)」)。イヤホンにするか `voice.input: "on"`。
 
 **「⛔ このルームは無効化または期限切れです」と出る**: そのルームはホストが閉鎖したか、7 日間誰も使わず自動失効した。古い URL では入り直せないので、ホストに新しいルームの URL をもらう。
 
-**Bluetooth イヤホンで再生音が途切れる**: 録音開始時にイヤホンが通話プロファイル(HFP)へ切り替わるため(macOS の仕様)。`./bin/ura-talk devices` で内蔵マイク名を調べ、`voice.device` に指定して録音だけ内蔵マイクに固定すると回避できる。
+**Bluetooth イヤホンで再生音が途切れる**: 録音開始時にイヤホンが通話プロファイル(HFP)へ切り替わるため(macOS の仕様)。`ura-talk devices` で内蔵マイク名を調べ、`voice.device` に指定して録音だけ内蔵マイクに固定すると回避できる。
 
 ## ショートカットキーの変更
 
-メニューバーの「**設定ファイルを開く…**」で config を開き、`voice.hotkey`(音声リッスン)と `input_hotkey`(文字入力バー)を変更(使えるキー名は `./bin/ura-talk keys`)。メニューの「**再起動**」で反映される。
+メニューバーの「**設定ファイルを開く…**」で config を開き、`voice.hotkey`(音声リッスン)と `input_hotkey`(文字入力バー)を変更(使えるキー名は `ura-talk keys`。パスは[困ったとき](#困ったとき)の読み替えを参照)。メニューの「**再起動**」で反映される。
 
 - **単体修飾キー**(`mods` 空): `rightcmd` / `leftcmd` / `rightoption` / `leftoption` / `rightshift` / `leftshift` / `fn`
 - **修飾キー2つのコード**: `mods` に押しっぱなしにする側を1つ(例 `{"mods":["rightshift"],"key":"rightcmd"}` = 右⇧+右⌘)。JIS 配列に右⌥ が無い場合に便利

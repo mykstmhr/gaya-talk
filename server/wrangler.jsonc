@@ -3,6 +3,8 @@
   "name": "ura-talk-room",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
+  // Workers Logs にリクエスト・例外を残す(異常時の調査用。無料枠あり)
+  "observability": { "enabled": true },
   "vars": {
     // 未アクティブなルームが失効するまでの日数
     "ROOM_IDLE_TTL_DAYS": "7"
