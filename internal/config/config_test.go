@@ -139,7 +139,7 @@ func TestMigrateLegacyPassthrough(t *testing.T) {
 // config.example.json が新スキーマとして正しくパースできることを確認する
 // (example を更新したときの壊れ検知)。
 func TestExampleConfig(t *testing.T) {
-	t.Setenv("GAYA_CONFIG", "../../config.example.json")
+	t.Setenv("GAYATALK_CONFIG", "../../config.example.json")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
@@ -161,10 +161,10 @@ func TestExampleConfig(t *testing.T) {
 	}
 }
 
-// 環境変数 GAYA_ROOM_SERVER が config の room.server を上書きする。
+// 環境変数 GAYATALK_ROOM_SERVER が config の room.server を上書きする。
 func TestEnvRoomServer(t *testing.T) {
-	t.Setenv("GAYA_CONFIG", "../../config.example.json")
-	t.Setenv("GAYA_ROOM_SERVER", "https://env.example.workers.dev")
+	t.Setenv("GAYATALK_CONFIG", "../../config.example.json")
+	t.Setenv("GAYATALK_ROOM_SERVER", "https://env.example.workers.dev")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)

@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "gaya-room",
+  "name": "gaya-talk-room",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-01",
   // Workers Logs にリクエスト・例外を残す(異常時の調査用。無料枠あり)

@@ -5,11 +5,11 @@
 
 # 各ターゲット末尾の `## 説明` を集めて一覧表示する。
 help: ## このヘルプを表示する
-	@echo "gaya make targets:"; \
+	@echo "gaya-talk make targets:"; \
 	grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | sort | \
 	awk 'BEGIN{FS=":.*## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-# バージョン情報をバイナリに埋め込む(メニュー・ログ・`gaya version` で表示)。
+# バージョン情報をバイナリに埋め込む(メニュー・ログ・`gaya-talk version` で表示)。
 # BUILD_VERSION: ローカルは git describe(例 v0.2.4-3-gc42e34d-dirty)。CI のリリース
 # ビルドはタグを明示的に渡す(shallow checkout では describe できないため)。
 # BUILD_KIND: "local"(既定)/ "release"(release.yml が渡す。自己アップデートの有効化条件)。
@@ -19,22 +19,22 @@ BUILD_KIND ?= local
 # -extldflags は cgo の -lobjc 重複によるリンカ警告(無害)の抑止。
 LDFLAGS := -ldflags "-X main.version=$(BUILD_VERSION) -X main.buildKind=$(BUILD_KIND) -extldflags=-Wl,-no_warn_duplicate_libraries"
 
-APP := build/gaya.app
+APP := build/gaya-talk.app
 
 # whisper モデルの取得先・置き場。config の whisper.model もここを指す。
-MODEL_DIR := $(HOME)/.config/gaya/models
+MODEL_DIR := $(HOME)/.config/gaya-talk/models
 MODEL := ggml-large-v3-turbo.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL)
 
 # 設定ファイルの置き場(.app はここを読む)。setup が配置し、enhance-model が model を書き換える。
-CONFIG := $(HOME)/.config/gaya/config.json
+CONFIG := $(HOME)/.config/gaya-talk/config.json
 
-# 整形用 Ollama の gaya 専用ホスト:ポート(config の enhance.endpoint と揃える)。
+# 整形用 Ollama の gaya-talk 専用ホスト:ポート(config の enhance.endpoint と揃える)。
 # アプリが自動起動し、アプリ終了時に一緒に停止する。他アプリの Ollama(11434)とは干渉しない。
 OLLAMA_HOST_DEDICATED := 127.0.0.1:11477
 
-# 署名ID。未指定ならキーチェーンにある gaya-dist(配布ビルドと同一の身元)→
-# gaya-dev の順で自動選択し、どちらも無ければアドホック(-)にフォールバックする。
+# 署名ID。未指定ならキーチェーンにある gaya-talk-dist(配布ビルドと同一の身元)→
+# gaya-talk-dev の順で自動選択し、どちらも無ければアドホック(-)にフォールバックする。
 # 配布と同じ身元で署名しておくと、ローカルビルドと配布版を行き来しても
 # アクセシビリティ等の権限がバッティングしない(TCC はバンドルID+署名で許可を持つ)。
 SIGN_IDENTITY ?=
@@ -70,19 +70,19 @@ setup-voice: ## 音声のフルセットアップ(whisper/ollama 導入 + モデ
 	@sed -i '' 's|"endpoint": *"http://localhost:11434"|"endpoint": "http://$(OLLAMA_HOST_DEDICATED)"|' "$(CONFIG)" 2>/dev/null || true
 	@$(MAKE) whisper-model
 	@$(MAKE) enhance-model
-	@if pgrep -x gaya >/dev/null 2>&1; then \
-	  pkill -x gaya; sleep 1; \
-	  if [ -d /Applications/gaya.app ]; then open /Applications/gaya.app; \
+	@if pgrep -x gaya-talk >/dev/null 2>&1; then \
+	  pkill -x gaya-talk; sleep 1; \
+	  if [ -d /Applications/gaya-talk.app ]; then open /Applications/gaya-talk.app; \
 	  elif [ -d $(APP) ]; then open $(APP); fi; \
 	  echo "✅ 音声セットアップ完了。アプリを再起動しました。"; \
-	elif [ -d /Applications/gaya.app ]; then \
-	  open /Applications/gaya.app; echo "✅ 音声セットアップ完了。アプリを起動しました。"; \
+	elif [ -d /Applications/gaya-talk.app ]; then \
+	  open /Applications/gaya-talk.app; echo "✅ 音声セットアップ完了。アプリを起動しました。"; \
 	else \
 	  echo "✅ 音声セットアップ完了。次: make app-open"; \
 	fi
 
-build: ## バイナリをビルド(bin/gaya)
-	go build $(LDFLAGS) -o bin/gaya .
+build: ## バイナリをビルド(bin/gaya-talk)
+	go build $(LDFLAGS) -o bin/gaya-talk .
 
 # アイコン(メニューバー PNG と AppIcon.icns)をコードから再生成する。
 # デザインを変えるときは build/genicons.swift を編集してこれを叩く。
@@ -94,33 +94,33 @@ icons: ## アイコン一式を再生成(build/genicons.swift)
 app: build ## .app を生成して署名する
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS $(APP)/Contents/Resources
-	cp bin/gaya $(APP)/Contents/MacOS/gaya
+	cp bin/gaya-talk $(APP)/Contents/MacOS/gaya-talk
 	cp build/Info.plist $(APP)/Contents/Info.plist
 	cp build/AppIcon.icns $(APP)/Contents/Resources/AppIcon.icns
 	@id="$(SIGN_IDENTITY)"; \
 	if [ -z "$$id" ]; then \
-	  if security find-identity -p codesigning 2>/dev/null | grep -q "gaya-dist"; then id="gaya-dist"; \
-	  elif security find-identity -p codesigning 2>/dev/null | grep -q "gaya-dev"; then id="gaya-dev"; \
+	  if security find-identity -p codesigning 2>/dev/null | grep -q "gaya-talk-dist"; then id="gaya-talk-dist"; \
+	  elif security find-identity -p codesigning 2>/dev/null | grep -q "gaya-talk-dev"; then id="gaya-talk-dev"; \
 	  else echo "署名証明書が無いためアドホック署名にフォールバックします"; id="-"; fi; \
 	elif [ "$$id" != "-" ] && ! security find-identity -p codesigning 2>/dev/null | grep -q "$$id"; then \
 	  echo "署名ID '$$id' がキーチェーンに無いためアドホック署名にフォールバックします"; id="-"; \
 	fi; \
-	codesign --force --sign "$$id" --identifier com.mykstmhr.gaya $(APP); \
+	codesign --force --sign "$$id" --identifier com.mykstmhr.gayatalk $(APP); \
 	echo "built $(APP) (signed with: $$id)"
 
-# 生成した .app を起動する(ログは ~/Library/Logs/gaya.log)。
+# 生成した .app を起動する(ログは ~/Library/Logs/gaya-talk.log)。
 app-open: app ## .app をビルドして起動する
 	open $(APP)
 
 # 配布用に .app を zip 化する(チームへ配って各自ビルド不要にする)。
 # 注意: 自己署名/アドホック署名のため、受け取った人は Gatekeeper で初回だけ
 # 「右クリック→開く」か quarantine 属性の削除が必要(下に案内を出す)。
-dist: app ## 配布用に .app を zip 化(dist/gaya.app.zip)
+dist: app ## 配布用に .app を zip 化(dist/gaya-talk.app.zip)
 	@mkdir -p dist
-	@rm -f dist/gaya.app.zip
-	@ditto -c -k --sequesterRsrc --keepParent $(APP) dist/gaya.app.zip
-	@echo "作成: dist/gaya.app.zip"
-	@echo "配布先での初回起動: アプリを右クリック→「開く」(またはターミナルで xattr -dr com.apple.quarantine /path/to/gaya.app)"
+	@rm -f dist/gaya-talk.app.zip
+	@ditto -c -k --sequesterRsrc --keepParent $(APP) dist/gaya-talk.app.zip
+	@echo "作成: dist/gaya-talk.app.zip"
+	@echo "配布先での初回起動: アプリを右クリック→「開く」(またはターミナルで xattr -dr com.apple.quarantine /path/to/gaya-talk.app)"
 	@echo "起動後にアクセシビリティ権限を許可。音声も使うなら別途 whisper-cpp とモデルが必要。"
 
 # GitHub Release を作る。タグを push すると CI(.github/workflows/release.yml)が
@@ -162,27 +162,27 @@ release: ## GitHub Release を作る(make release VERSION=v1.2.3 | patch | minor
 	git tag -a "$$v" -m "$$v"; \
 	git push origin main "$$v"; \
 	echo "✅ タグ $$v を push しました。CI がテスト → zip ビルド → Release 添付まで行います。"; \
-	echo "   進捗: https://github.com/mykstmhr/gaya/actions"
+	echo "   進捗: https://github.com/mykstmhr/gaya-talk/actions"
 
-# 起動中の gaya を停止して開き直す(config 変更の反映など)。
+# 起動中の gaya-talk を停止して開き直す(config 変更の反映など)。
 # -x はプロセス名で完全一致するので、pkill 自身のシェル行を誤爆しない。
 # 開き直す .app は /Applications 優先(gh release で入れた人が大半)、無ければローカルビルド。
 restart: ## 起動中の .app を停止して開き直す(config 変更の反映。再ビルドはしない)
-	@pkill -x gaya 2>/dev/null || true
+	@pkill -x gaya-talk 2>/dev/null || true
 	@sleep 1
-	@if [ -d /Applications/gaya.app ]; then open /Applications/gaya.app; \
+	@if [ -d /Applications/gaya-talk.app ]; then open /Applications/gaya-talk.app; \
 	elif [ -d $(APP) ]; then open $(APP); \
-	else echo "⚠️ gaya.app が見つかりません(/Applications にも $(APP) にも無い)。README のインストールか make app-open を先に。"; exit 1; fi
-	@echo "再起動しました(ログ: ~/Library/Logs/gaya.log)"
+	else echo "⚠️ gaya-talk.app が見つかりません(/Applications にも $(APP) にも無い)。README のインストールか make app-open を先に。"; exit 1; fi
+	@echo "再起動しました(ログ: ~/Library/Logs/gaya-talk.log)"
 
-# .app 起動時のログ(~/Library/Logs/gaya.log)を追尾する。
+# .app 起動時のログ(~/Library/Logs/gaya-talk.log)を追尾する。
 # ログの実体は macOS の作法どおり ~/Library/Logs/ に置く(リポジトリ内には置かない:
 # 発話由来の内容を含みうるため誤コミットを避け、.app の CWD にも依存しない)。
-logs: ## .app のログ(~/Library/Logs/gaya.log)を tail -f で追う
-	@touch ~/Library/Logs/gaya.log
-	@tail -f ~/Library/Logs/gaya.log
+logs: ## .app のログ(~/Library/Logs/gaya-talk.log)を tail -f で追う
+	@touch ~/Library/Logs/gaya-talk.log
+	@tail -f ~/Library/Logs/gaya-talk.log
 
-# whisper モデルを ~/.config/gaya/models/ にダウンロードする(既定 turbo、既にあれば skip)。
+# whisper モデルを ~/.config/gaya-talk/models/ にダウンロードする(既定 turbo、既にあれば skip)。
 # 特定モデルを直接指定するとき: make model MODEL=ggml-large-v3.bin
 model: ## whisper モデルを直接指定して取得(make model MODEL=<file>)
 	@mkdir -p $(MODEL_DIR)
@@ -215,11 +215,11 @@ whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	  echo "保存: $(MODEL_DIR)/$$m"; \
 	fi; \
 	if [ -f "$(CONFIG)" ]; then \
-	  sed -i '' -e "/\"whisper\": *{/,/}/ s|\"model\": *\"[^\"]*\"|\"model\": \"~/.config/gaya/models/$$m\"|" \
-	            -e "s|\"whisper_model\": *\"[^\"]*\"|\"whisper_model\": \"~/.config/gaya/models/$$m\"|" "$(CONFIG)"; \
+	  sed -i '' -e "/\"whisper\": *{/,/}/ s|\"model\": *\"[^\"]*\"|\"model\": \"~/.config/gaya-talk/models/$$m\"|" \
+	            -e "s|\"whisper_model\": *\"[^\"]*\"|\"whisper_model\": \"~/.config/gaya-talk/models/$$m\"|" "$(CONFIG)"; \
 	  echo "✅ whisper.model を $$m に更新: $(CONFIG)"; \
 	else \
-	  echo "⚠️ $(CONFIG) が無いので whisper.model は手動設定してください(値: ~/.config/gaya/models/$$m)"; \
+	  echo "⚠️ $(CONFIG) が無いので whisper.model は手動設定してください(値: ~/.config/gaya-talk/models/$$m)"; \
 	fi
 
 # 整形用の LLM(Ollama)モデルを選んで pull し、config の enhance.model に反映する。
@@ -274,17 +274,17 @@ clean: ## ビルド成果物を削除する
 # 可能性があるため触らない(必要なら README の任意手順を参照)。
 uninstall: ## アプリ・設定・モデル・内部データ・ログ・権限登録を削除する
 	@echo "以下を削除します:"
-	@echo "  /Applications/gaya.app と $(APP)"
-	@echo "  ~/.config/gaya(config と whisper モデル)"
-	@echo "  ~/Library/Application Support/gaya(表示名・ルーム管理シークレット)"
-	@echo "  ~/Library/Logs/gaya.log と 権限登録(アクセシビリティ/マイク)"
+	@echo "  /Applications/gaya-talk.app と $(APP)"
+	@echo "  ~/.config/gaya-talk(config と whisper モデル)"
+	@echo "  ~/Library/Application Support/gaya-talk(表示名・ルーム管理シークレット)"
+	@echo "  ~/Library/Logs/gaya-talk.log と 権限登録(アクセシビリティ/マイク)"
 	@echo "⚠️ 自分が作成したルームは管理シークレットが消えると二度と無効化できません。"
 	@printf "よろしいですか? [y/N]: "; read ans; case "$$ans" in y|Y|yes) ;; *) echo "中止しました。"; exit 1 ;; esac
-	@pkill -x gaya 2>/dev/null || true; sleep 1
-	@rm -rf /Applications/gaya.app $(APP) bin
-	@rm -rf "$(HOME)/.config/gaya"
-	@rm -rf "$(HOME)/Library/Application Support/gaya"
-	@rm -f "$(HOME)/Library/Logs/gaya.log"
-	@tccutil reset Accessibility com.mykstmhr.gaya >/dev/null 2>&1 || true
-	@tccutil reset Microphone com.mykstmhr.gaya >/dev/null 2>&1 || true
+	@pkill -x gaya-talk 2>/dev/null || true; sleep 1
+	@rm -rf /Applications/gaya-talk.app $(APP) bin
+	@rm -rf "$(HOME)/.config/gaya-talk"
+	@rm -rf "$(HOME)/Library/Application Support/gaya-talk"
+	@rm -f "$(HOME)/Library/Logs/gaya-talk.log"
+	@tccutil reset Accessibility com.mykstmhr.gayatalk >/dev/null 2>&1 || true
+	@tccutil reset Microphone com.mykstmhr.gayatalk >/dev/null 2>&1 || true
 	@echo "✅ アンインストールしました。ollama のモデルや brew パッケージも消す場合は README の「アンインストール」を参照。"

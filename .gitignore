@@ -2,7 +2,7 @@
 config.json
 
 # ビルド成果物
-/gaya
+/gaya-talk
 /bin/
 build/*.app/
 /dist/

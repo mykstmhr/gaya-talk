@@ -22,9 +22,9 @@ func TestCleanupStaleTempFiles(t *testing.T) {
 		return p
 	}
 
-	stale := write("gaya-old.wav", time.Hour)   // 古い → 消える
-	fresh := write("gaya-new.wav", time.Second) // 新しい(処理中かも)→ 残す
-	other := write("important.wav", time.Hour)  // 対象外 → 残す
+	stale := write("gaya-talk-old.wav", time.Hour)   // 古い → 消える
+	fresh := write("gaya-talk-new.wav", time.Second) // 新しい(処理中かも)→ 残す
+	other := write("important.wav", time.Hour)       // 対象外 → 残す
 
 	n, err := CleanupStaleTempFiles(dir, 10*time.Minute)
 	if err != nil {

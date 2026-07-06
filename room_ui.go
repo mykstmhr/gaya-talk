@@ -12,15 +12,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mykstmhr/gaya/internal/adminstore"
-	"github.com/mykstmhr/gaya/internal/config"
-	"github.com/mykstmhr/gaya/internal/dialog"
-	"github.com/mykstmhr/gaya/internal/inputbar"
-	"github.com/mykstmhr/gaya/internal/mirror"
-	"github.com/mykstmhr/gaya/internal/namestore"
-	"github.com/mykstmhr/gaya/internal/overlay"
-	"github.com/mykstmhr/gaya/internal/room"
-	"github.com/mykstmhr/gaya/internal/slack"
+	"github.com/mykstmhr/gaya-talk/internal/adminstore"
+	"github.com/mykstmhr/gaya-talk/internal/config"
+	"github.com/mykstmhr/gaya-talk/internal/dialog"
+	"github.com/mykstmhr/gaya-talk/internal/inputbar"
+	"github.com/mykstmhr/gaya-talk/internal/mirror"
+	"github.com/mykstmhr/gaya-talk/internal/namestore"
+	"github.com/mykstmhr/gaya-talk/internal/overlay"
+	"github.com/mykstmhr/gaya-talk/internal/room"
+	"github.com/mykstmhr/gaya-talk/internal/slack"
 
 	"fyne.io/systray"
 )
@@ -121,7 +121,7 @@ func setupRoom(cfg *config.Config) {
 	} else {
 		go func() {
 			for range down {
-				if os.Getenv("GAYA_DEBUG") != "" {
+				if os.Getenv("GAYATALK_DEBUG") != "" {
 					log.Println("inputbar: ホットキー検知 → Toggle 呼び出し")
 				}
 				inputbar.Toggle()
@@ -312,7 +312,7 @@ var seenIDs = room.NewDeduper(5 * time.Minute)
 // displayComment は重複を除いてコメントをオーバーレイに流す(ミラー有効なら Slack へも)。
 func displayComment(p room.Payload) {
 	if seenIDs.Seen(p.ID) {
-		if os.Getenv("GAYA_DEBUG") != "" {
+		if os.Getenv("GAYATALK_DEBUG") != "" {
 			log.Printf("重複コメントをスキップ: id=%s", p.ID)
 		}
 		return
@@ -362,7 +362,7 @@ func startMirror(cfg *config.Config, r *room.Room, confirm bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	err := slackMirror.Start(ctx, slack.New(cfg.Room.SlackBotToken), r.SlackChannel,
-		"📝 gaya のコメントをこのスレッドに記録します(room "+truncRunes(r.Token, 8)+")")
+		"📝 gaya-talk のコメントをこのスレッドに記録します(room "+truncRunes(r.Token, 8)+")")
 	if err != nil {
 		log.Printf("⚠️ Slack 記録を開始できませんでした: %v", err)
 		return

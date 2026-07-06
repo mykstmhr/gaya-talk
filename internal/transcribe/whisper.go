@@ -15,7 +15,7 @@ import (
 )
 
 // tempPattern は本ツールが作る一時 WAV のグロブパターン。
-const tempPattern = "gaya-*.wav"
+const tempPattern = "gaya-talk-*.wav"
 
 // CleanupStaleTempFiles は dir 内に残った古い一時 WAV を削除する。
 // 通常は処理後に削除されるが、クラッシュ時の消し残りに備えて起動時に呼ぶ。

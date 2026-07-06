@@ -8,14 +8,14 @@
 
 ```sh
 (cd server && npx wrangler login)   # ブラウザで Cloudflare に認可(初回のみ)
-make deploy                         # テスト実行 → デプロイ。出力される https://gaya-room.<account>.workers.dev を控える
+make deploy                         # テスト実行 → デプロイ。出力される https://gaya-talk-room.<account>.workers.dev を控える
 ```
 
-デプロイした URL を config の **`room.server`** に設定する(ルーム作成に使う。参加するだけの人には不要)。環境変数 **`GAYA_ROOM_SERVER`** でも渡せる(config より優先。ただし Finder から起動する `.app` はシェルの環境変数を引き継がないので、端末から `open` するか `launchctl setenv` を使う)。詳細は [server/README.md](../server/README.md)、設計は [room-overlay-design.md](room-overlay-design.md)。
+デプロイした URL を config の **`room.server`** に設定する(ルーム作成に使う。参加するだけの人には不要)。環境変数 **`GAYATALK_ROOM_SERVER`** でも渡せる(config より優先。ただし Finder から起動する `.app` はシェルの環境変数を引き継がないので、端末から `open` するか `launchctl setenv` を使う)。詳細は [server/README.md](../server/README.md)、設計は [room-overlay-design.md](room-overlay-design.md)。
 
 **費用**: テキストだけ・超低帯域なので、社内チームの会議で使う限り **Cloudflare 無料枠で収まります**。理由と目安は[アーキテクチャと無料枠のコスト](development.md#アーキテクチャと無料枠のコスト)を参照。
 
-**作成認証(推奨)**: サーバ URL は招待 URL の一部として全参加者に見えるため、既定では URL を知る誰でもルームを作れてしまう。`(cd server && npx wrangler secret put CREATE_SECRET)` で任意のシークレットを設定すると、ルーム作成に認証が掛かる。設定したら、あなた(ルームを作る人)の config の **`room.create_secret`**(または環境変数 **`GAYA_ROOM_CREATE_SECRET`**)に同じ値を書く。参加するだけのメンバーには不要。
+**作成認証(推奨)**: サーバ URL は招待 URL の一部として全参加者に見えるため、既定では URL を知る誰でもルームを作れてしまう。`(cd server && npx wrangler secret put CREATE_SECRET)` で任意のシークレットを設定すると、ルーム作成に認証が掛かる。設定したら、あなた(ルームを作る人)の config の **`room.create_secret`**(または環境変数 **`GAYATALK_ROOM_CREATE_SECRET`**)に同じ値を書く。参加するだけのメンバーには不要。
 
 ## ルームを作って配る
 
@@ -39,7 +39,7 @@ make deploy                         # テスト実行 → デプロイ。出力�
 **手動の無効化(作成者のみ)**
 
 - ルームに参加中、メニューの **「このルームを無効化…」** でいつでも閉鎖できる。参加中の全員が即座に切断され、以後その URL では誰も参加できない。**元に戻せない**
-- 無効化できるのは作成者だけ。作成時に発行される管理シークレットが作成者のマシンにだけ保存される(`~/Library/Application Support/gaya/admin_secrets.json`。共有 URL には含まれない)ため、URL を知っているだけの参加者には閉鎖できない
+- 無効化できるのは作成者だけ。作成時に発行される管理シークレットが作成者のマシンにだけ保存される(`~/Library/Application Support/gaya-talk/admin_secrets.json`。共有 URL には含まれない)ため、URL を知っているだけの参加者には閉鎖できない
 - いったん退出していても、同じマシンで URL から入り直せばシークレットが復元されて無効化メニューが使える
 - メンバーから外したい人がいる場合は、無効化して**新しいルームを作って配り直す**。復号鍵は URL に入っているため回収できないが、無効化すれば中継自体が止まるので、鍵を持っていても以後のコメントは一切届かない
 
@@ -59,7 +59,7 @@ curl -si --http1.1 \
 ルームのコメントを Slack チャンネルに残したいときは、**あなた(ミラー役)だけ**が Slack を設定すればよい(他のメンバーは何も要らない)。復号済みコメントはあなたのクライアントが持っているので、そこから転送する(中継サーバは本文を復号できない)。
 
 1. Slack アプリを作成 → **Bot Token Scopes** に `chat:write` → ワークスペースにインストールして **Bot Token(`xoxb-…`)** を取得 → 投稿先チャンネルに bot を招待
-2. config の `room.slack_bot_token`(または環境変数 `GAYA_SLACK_BOT_TOKEN`)を設定。`room.slack_channel` は作成時に尋ねられるチャンネルの既定値
+2. config の `room.slack_bot_token`(または環境変数 `GAYATALK_SLACK_BOT_TOKEN`)を設定。`room.slack_channel` は作成時に尋ねられるチャンネルの既定値
 3. **「新規ルームを作成」時に記録先チャンネルを尋ねられる**(空欄で記録なし)。指定するとそのチャンネルが**ルームの URL に紐づき**、作成者は自動で記録を開始する。ルームごとに別チャンネルにできる
 4. **記録対象のルームは全参加者に見える**: 入ると「🔴 このルームは Slack に記録されます」がオーバーレイに出て、メニュー状態にも `🔴Slack記録対象` と表示される(透明性)
 5. 記録はメニューの **「Slack に記録」** で止める/再開できる(退出・切断で自動停止)

@@ -11,7 +11,7 @@
         "server": "",
         // ルーム作成の認証シークレット(サーバ側で `wrangler secret put CREATE_SECRET` を
         // 設定している場合のみ必要。参加だけの人は不要)。環境変数
-        // GAYA_ROOM_CREATE_SECRET でも渡せる(config に平文で書きたくない場合)。
+        // GAYATALK_ROOM_CREATE_SECRET でも渡せる(config に平文で書きたくない場合)。
         "create_secret": "",
         // 記名ルーム(メニューの「新規ルームを作成 — 記名」で作る)で名乗る表示名。
         // 空なら記名ルームの作成/参加時に入力を促す(入力は内部ファイルに保存され次回以降は
@@ -19,7 +19,7 @@
         "display_name": "",
         // Slack ミラー(任意): ルームのコメントを Slack チャンネルへスレッドで転送する。
         // 設定した人だけが「ミラー役」になれる(他のメンバーは設定不要)。両方空ならメニューに
-        // 「Slack に記録」は出ない。bot token は環境変数 GAYA_SLACK_BOT_TOKEN でも渡せる。
+        // 「Slack に記録」は出ない。bot token は環境変数 GAYATALK_SLACK_BOT_TOKEN でも渡せる。
         // 必要な準備: Slack アプリを作成 → Bot Token Scopes に chat:write → ワークスペースに
         // インストール(xoxb-... を取得)→ 投稿先チャンネルに bot を招待。
         "slack_bot_token": "",
@@ -32,7 +32,7 @@
     // 文字入力バーを出すキー(音声トリガの voice.hotkey とは別のキーにする)。
     // 単体修飾キー(rightcmd 等)のほか、修飾キー 2 つのコードも指定できる
     // (mods に押しっぱなしにする側を 1 つ書く)。JIS 配列には右⌥ が無い。
-    // 指定できるキーは  gaya keys  。
+    // 指定できるキーは  gaya-talk keys  。
     "input_hotkey": {
         "mods": [],
         "key": "rightcmd"
@@ -68,13 +68,13 @@
         },
         // "vad" = 無音で自動区切り(ホットキーでトグル)/ "ptt" = 押している間だけ録音
         "listen_mode": "vad",
-        // 録音に使うマイク。デバイス名の部分一致(空ならシステム既定デバイス)。候補は  gaya devices  。
+        // 録音に使うマイク。デバイス名の部分一致(空ならシステム既定デバイス)。候補は  gaya-talk devices  。
         // 指定した名前がどのデバイスにも一致しないと起動に失敗するので注意。
         // Bluetooth イヤホン使用時は内蔵マイク(例 "MacBook")を明示すると、録音開始で
         // イヤホンが通話モードに切り替わり再生音が劣化するのを防げる。
         "device": "",
         "vad": {
-            // 音声検出のしきい値(GAYA_DEBUG=1 で rms= を見て調整)
+            // 音声検出のしきい値(GAYATALK_DEBUG=1 で rms= を見て調整)
             "threshold": 0.01,
             // これより短い音は発話と見なさない
             "min_speech_ms": 300,
@@ -105,7 +105,7 @@
         // whisper-cli の場所(brew install whisper-cpp)
         "bin": "/opt/homebrew/bin/whisper-cli",
         // ggml モデルのパス(make setup-voice / make whisper-model で取得・設定できる)
-        "model": "~/.config/gaya/models/ggml-large-v3-turbo.bin",
+        "model": "~/.config/gaya-talk/models/ggml-large-v3-turbo.bin",
         // 文字起こし言語("ja" / 自動判定なら "auto" など)
         "language": "ja",
         // 語彙・口調のヒント(誤認識の低減)
@@ -124,7 +124,7 @@
         "enabled": true,
         // 整形バックエンド(現状 "ollama" のみ)
         "backend": "ollama",
-        // gaya 専用ポートの Ollama を自動起動して使う(アプリ終了時に一緒に停止)。
+        // gaya-talk 専用ポートの Ollama を自動起動して使う(アプリ終了時に一緒に停止)。
         // 他のアプリと共有している標準の Ollama を使うなら "http://localhost:11434" に
         // する(その場合はアプリ終了時も止めない)。
         "endpoint": "http://127.0.0.1:11477",

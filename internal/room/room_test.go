@@ -11,7 +11,7 @@ func TestURLRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := &Room{
-		Server:       "https://gaya-room.example.workers.dev",
+		Server:       "https://gaya-talk-room.example.workers.dev",
 		Token:        "abcdefghijKLMNOPQRST12",
 		Key:          key,
 		Named:        true,

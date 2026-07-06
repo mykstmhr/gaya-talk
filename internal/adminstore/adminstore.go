@@ -28,13 +28,13 @@ type Store struct {
 // New はディレクトリ dir を使う Store を返す。dir が空なら保存しない(常に空)。
 func New(dir string) *Store { return &Store{dir: dir} }
 
-// DefaultDir は ~/Library/Application Support/gaya を返す(namestore と同じ場所)。
+// DefaultDir は ~/Library/Application Support/gaya-talk を返す(namestore と同じ場所)。
 func DefaultDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Application Support", "gaya"), nil
+	return filepath.Join(home, "Library", "Application Support", "gaya-talk"), nil
 }
 
 func (s *Store) path() string { return filepath.Join(s.dir, "admin_secrets.json") }

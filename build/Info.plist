@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>gaya</string>
+	<string>gaya-talk</string>
 	<key>CFBundleDisplayName</key>
-	<string>gaya</string>
+	<string>gaya-talk</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.mykstmhr.gaya</string>
+	<string>com.mykstmhr.gayatalk</string>
 	<key>CFBundleExecutable</key>
-	<string>gaya</string>
+	<string>gaya-talk</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<!-- Finder/配布 zip で表示されるアプリアイコン(build/genicons.swift で生成) -->

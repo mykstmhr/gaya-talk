@@ -1,4 +1,4 @@
-# gaya
+# gaya-talk
 
 声やキー入力をその場で文字にして、**画面全体の透過オーバーレイにライブコメントとして右から左へ流す** macOS 常駐ツール。同じルームに参加したメンバーの画面にも同じコメントが流れる。文字起こしは **ローカルの whisper.cpp** で行い、音声は外部に送らない。
 
@@ -25,10 +25,10 @@
 **いちばん簡単なのはターミナルで 1 コマンド**(ビルド不要。`gh`([GitHub CLI](https://cli.github.com/))でダウンロードすると quarantine が付かず、Gatekeeper の警告も出ない。インストールとアップデートが同じコマンド):
 
 ```sh
-d="$(mktemp -d)" && gh release download --repo mykstmhr/gaya --pattern gaya.app.zip --dir "$d" \
-  && { pkill -x gaya 2>/dev/null; sleep 1; rm -rf /Applications/gaya.app; } \
-  && ditto -x -k "$d/gaya.app.zip" /Applications \
-  && open /Applications/gaya.app
+d="$(mktemp -d)" && gh release download --repo mykstmhr/gaya-talk --pattern gaya-talk.app.zip --dir "$d" \
+  && { pkill -x gaya-talk 2>/dev/null; sleep 1; rm -rf /Applications/gaya-talk.app; } \
+  && ditto -x -k "$d/gaya-talk.app.zip" /Applications \
+  && open /Applications/gaya-talk.app
 ```
 
 (起動中でも安全に入れ替わる。同じパス・同じ署名なので付与済みの権限も引き継がれる)
@@ -37,9 +37,9 @@ d="$(mktemp -d)" && gh release download --repo mykstmhr/gaya --pattern gaya.app.
 
 (`gh` が無ければ `brew install gh && gh auth login`。private repo のためブラウザ・curl では要認証)
 
-ブラウザで [Releases](https://github.com/mykstmhr/gaya/releases) から zip を落とした場合は、解凍した `gaya.app` を**「アプリケーション」フォルダへ移動**してから開く(ダウンロードフォルダのまま開くと Gatekeeper のパスランダム化でホットキーが効かない)。未公証のため「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通す。
+ブラウザで [Releases](https://github.com/mykstmhr/gaya-talk/releases) から zip を落とした場合は、解凍した `gaya-talk.app` を**「アプリケーション」フォルダへ移動**してから開く(ダウンロードフォルダのまま開くと Gatekeeper のパスランダム化でホットキーが効かない)。未公証のため「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通す。
 
-設定ファイルは初回起動時に `~/.config/gaya/config.json` へ自動生成されます。
+設定ファイルは初回起動時に `~/.config/gaya-talk/config.json` へ自動生成されます。
 
 自分でビルドする場合:
 
@@ -60,12 +60,12 @@ make app-open              # .app をビルドして起動
 イヤホン/ヘッドホンで会議音声を聞くなら、声もそのまま流せます(スピーカー出力だと相手の声をマイクが拾ってしまうため、後述のとおり自動でオフになります)。app 版を使っている人も、リポジトリを clone して 1 コマンドで揃います:
 
 ```sh
-git clone https://github.com/mykstmhr/gaya && cd gaya   # 未 clone なら
+git clone https://github.com/mykstmhr/gaya-talk && cd gaya-talk   # 未 clone なら
 make setup-voice   # whisper/ollama の導入(未導入なら)→ モデル取得 → config 反映 → アプリ再起動
 ```
 
 - 初回に **マイク権限**も許可する
-- 整形用の Ollama は **gaya 専用ポート(11477)で自動起動し、アプリ終了時に一緒に停止**する。他のアプリで使っている Ollama(11434)とは干渉しない(共有したい場合は config の `enhance.endpoint` を `http://localhost:11434` に)
+- 整形用の Ollama は **gaya-talk 専用ポート(11477)で自動起動し、アプリ終了時に一緒に停止**する。他のアプリで使っている Ollama(11434)とは干渉しない(共有したい場合は config の `enhance.endpoint` を `http://localhost:11434` に)
 - **`右Shift+右⌘`** で音声リッスンの開始/停止(VAD)。話すと無音の切れ目で自動区切りして流れる。もう一度キーで停止
 - リッスン中は**全モニターの画面下部に小さな状態バー**(音量メーター付き)が出て、メニューバーのアイコンがオレンジになる。発話を拾うと赤ドット、文字起こしが並行しているときはロボのバッジ(2件以上は ×N)、リッスンを止めた後も流れ終わるまで「文字起こし中…」が残る。スピーカー出力中でリッスンが始まらないときは「音声オフ」と一瞬表示される。バーは画面共有には映らず、クリックも素通しする(消したいなら config の `voice.bar` を `false`)
 - 文字入力バーと音声リッスンは**排他**: リッスン中に文字入力バー(`右⌘`)を開くとリッスンは自動停止し、逆にリッスンを始めると入力途中のバーは閉じる
@@ -82,22 +82,22 @@ make setup-voice   # whisper/ollama の導入(未導入なら)→ モデル取�
 
 ## 困ったとき
 
-以下の `gaya` コマンドは、zip で入れた場合は `/Applications/gaya.app/Contents/MacOS/gaya`、clone してビルドした場合は `./bin/gaya` に読み替える。
+以下の `gaya-talk` コマンドは、zip で入れた場合は `/Applications/gaya-talk.app/Contents/MacOS/gaya-talk`、clone してビルドした場合は `./bin/gaya-talk` に読み替える。
 
 **声が小さい・認識が悪い**(効く順):
 1. **自動ゲイン**(既定 ON)。まだ小さいなら `gain.max_gain` を `12 → 20`
-2. **VAD で拾われない**: `GAYA_DEBUG=1 gaya dryrun` で喋ったときの `rms=` を見て `vad.threshold` をその少し下に
+2. **VAD で拾われない**: `GAYATALK_DEBUG=1 gaya-talk dryrun` で喋ったときの `rms=` を見て `vad.threshold` をその少し下に
 3. **初期プロンプト** `whisper.prompt` に想定する口調・語彙(相槌など)を入れる
 
 **マイクに切り替えたのに音声が入らない**: 出力がスピーカーだと `voice.input: "auto"` は自動オフになる(メニューに「音声オフ(スピーカー出力中)」)。イヤホンにするか `voice.input: "on"`。
 
 **「⛔ このルームは無効化または期限切れです」と出る**: そのルームはホストが閉鎖したか、7 日間誰も使わず自動失効した。古い URL では入り直せないので、ホストに新しいルームの URL をもらう。
 
-**Bluetooth イヤホンで再生音が途切れる**: 録音開始時にイヤホンが通話プロファイル(HFP)へ切り替わるため(macOS の仕様)。`gaya devices` で内蔵マイク名を調べ、`voice.device` に指定して録音だけ内蔵マイクに固定すると回避できる。
+**Bluetooth イヤホンで再生音が途切れる**: 録音開始時にイヤホンが通話プロファイル(HFP)へ切り替わるため(macOS の仕様)。`gaya-talk devices` で内蔵マイク名を調べ、`voice.device` に指定して録音だけ内蔵マイクに固定すると回避できる。
 
 ## ショートカットキーの変更
 
-メニューバーの「**設定ファイルを開く…**」で config を開き、`voice.hotkey`(音声リッスン)と `input_hotkey`(文字入力バー)を変更(使えるキー名は `gaya keys`。パスは[困ったとき](#困ったとき)の読み替えを参照)。メニューの「**再起動**」で反映される。
+メニューバーの「**設定ファイルを開く…**」で config を開き、`voice.hotkey`(音声リッスン)と `input_hotkey`(文字入力バー)を変更(使えるキー名は `gaya-talk keys`。パスは[困ったとき](#困ったとき)の読み替えを参照)。メニューの「**再起動**」で反映される。
 
 - **単体修飾キー**(`mods` 空): `rightcmd` / `leftcmd` / `rightoption` / `leftoption` / `rightshift` / `leftshift` / `fn`
 - **修飾キー2つのコード**: `mods` に押しっぱなしにする側を1つ(例 `{"mods":["rightshift"],"key":"rightcmd"}` = 右⇧+右⌘)。JIS 配列に右⌥ が無い場合に便利
@@ -124,21 +124,21 @@ make restart
 
 ```sh
 # 1. アプリを終了(専用 Ollama も一緒に止まる)して本体を削除
-pkill -x gaya 2>/dev/null; sleep 1
-rm -rf /Applications/gaya.app
+pkill -x gaya-talk 2>/dev/null; sleep 1
+rm -rf /Applications/gaya-talk.app
 
 # 2. 設定と whisper モデル(Slack トークンを書いていた場合もここごと消える)
-rm -rf ~/.config/gaya
+rm -rf ~/.config/gaya-talk
 
 # 3. 内部データ(表示名・ルーム管理シークレット・多重起動ロック)
-rm -rf ~/Library/"Application Support"/gaya
+rm -rf ~/Library/"Application Support"/gaya-talk
 
 # 4. ログ
-rm -f ~/Library/Logs/gaya.log
+rm -f ~/Library/Logs/gaya-talk.log
 
 # 5. 付与した権限(アクセシビリティ・マイク)の登録を削除
-tccutil reset Accessibility com.mykstmhr.gaya
-tccutil reset Microphone com.mykstmhr.gaya
+tccutil reset Accessibility com.mykstmhr.gayatalk
+tccutil reset Microphone com.mykstmhr.gayatalk
 ```
 
 必要に応じて(**他のアプリでも使っていないか確認してから**):
@@ -146,10 +146,10 @@ tccutil reset Microphone com.mykstmhr.gaya
 ```sh
 ollama rm qwen2.5:3b                 # 整形用に pull した LLM モデル(選んだものに読み替え)
 brew uninstall whisper-cpp ollama    # setup-voice で入れた場合のみ
-launchctl unsetenv GAYA_ROOM_SERVER  # launchctl setenv で設定していた場合のみ
+launchctl unsetenv GAYATALK_ROOM_SERVER  # launchctl setenv で設定していた場合のみ
 ```
 
-clone してビルドしていた人は、リポジトリの `bin/` `build/gaya.app` `dist/` も `make clean` かディレクトリごと削除。一時ファイル(`$TMPDIR/gaya-*.wav`)は再起動で消えるが、すぐ消したければ `rm -f "$TMPDIR"/gaya-*.wav`。
+clone してビルドしていた人は、リポジトリの `bin/` `build/gaya-talk.app` `dist/` も `make clean` かディレクトリごと削除。一時ファイル(`$TMPDIR/gaya-talk-*.wav`)は再起動で消えるが、すぐ消したければ `rm -f "$TMPDIR"/gaya-talk-*.wav`。
 
 ---
 
