@@ -113,17 +113,25 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (!gWins || gWins.count == 0 || text.length == 0) return;
 
-		// 白フチではなく黒フチ+塗り(strokeWidth 負値)で、明るい背景の上でも読める視認性を出す。
-		NSDictionary *attrs = @{
-			NSFontAttributeName: [NSFont boldSystemFontOfSize:kFontSize],
-			NSForegroundColorAttributeName: [NSColor colorWithSRGBRed:r green:g blue:b alpha:1],
+		// 黒フチ+塗りの 2 パス描画。フチと塗りを同時に描く(strokeWidth 負値)方式は
+		// フチを太くするほど文字の中身が痩せて読みにくくなるため、先に太いフチだけを
+		// 描き、その上に塗りだけを重ねる(ライブ配信字幕の定石)。日本語の heavy は
+		// ヒラギノ W8 相当になり、明るい背景・ごちゃついた背景の上でも輪郭が立つ。
+		NSFont *font = [NSFont systemFontOfSize:kFontSize weight:NSFontWeightHeavy];
+		NSDictionary *strokeAttrs = @{
+			NSFontAttributeName: font,
 			NSStrokeColorAttributeName: [NSColor blackColor],
-			NSStrokeWidthAttributeName: @(-4.0),
+			NSStrokeWidthAttributeName: @(10.0), // 正値 = フチのみ(フォントサイズの 10%)
 		};
-		NSAttributedString *s = [[NSAttributedString alloc] initWithString:text attributes:attrs];
-		NSSize sz = [s size];
-		sz.width = ceil(sz.width) + 6;
-		sz.height = ceil(sz.height) + 6;
+		NSDictionary *fillAttrs = @{
+			NSFontAttributeName: font,
+			NSForegroundColorAttributeName: [NSColor colorWithSRGBRed:r green:g blue:b alpha:1],
+		};
+		NSAttributedString *stroke = [[NSAttributedString alloc] initWithString:text attributes:strokeAttrs];
+		NSAttributedString *fill = [[NSAttributedString alloc] initWithString:text attributes:fillAttrs];
+		NSSize sz = [fill size]; // フチは字送りを変えないので塗りの寸法+余白で足りる
+		sz.width = ceil(sz.width) + 8;
+		sz.height = ceil(sz.height) + 8;
 
 		// CATextLayer はフチ取り(stroke)を描けないため、一度ビットマップに描いて
 		// CALayer.contents に貼る。Retina で滲まないよう 2x で描き、全モニターで共有する。
@@ -134,14 +142,17 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 			pixelsHigh:(NSInteger)ceil(sz.height * scale)
 			bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
 			colorSpaceName:NSCalibratedRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
-		if (!rep) { [s release]; return; }
+		if (!rep) { [stroke release]; [fill release]; return; }
 		rep.size = sz;
 		[NSGraphicsContext saveGraphicsState];
 		[NSGraphicsContext setCurrentContext:
 			[NSGraphicsContext graphicsContextWithBitmapImageRep:rep]];
-		[s drawAtPoint:NSMakePoint(3, 3)];
+		[stroke drawAtPoint:NSMakePoint(4, 4)];
+		[fill drawAtPoint:NSMakePoint(4, 4)];
 		[NSGraphicsContext restoreGraphicsState];
-		[s release]; // ARC なし: 描画し終えたら所有権を手放す(放置するとコメントごとにリークする)
+		// ARC なし: 描画し終えたら所有権を手放す(放置するとコメントごとにリークする)
+		[stroke release];
+		[fill release];
 
 		for (NSUInteger wi = 0; wi < gWins.count; wi++) {
 			NSWindow *win = gWins[wi];
