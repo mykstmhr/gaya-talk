@@ -2,9 +2,9 @@
 config.json
 
 # ビルド成果物
-/ura-talk
+/gaya
 /bin/
-build/ura-talk.app/
+build/*.app/
 /dist/
 
 # モデルファイル(大きいのでコミットしない)

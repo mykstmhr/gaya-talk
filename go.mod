@@ -1,4 +1,4 @@
-module github.com/mykstmhr/ura-talk
+module github.com/mykstmhr/gaya
 
 go 1.26.4
 

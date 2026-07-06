@@ -72,9 +72,9 @@ import (
 	"sync"
 )
 
-// debug は URATALK_DEBUG 時に flagsChanged の受信と watcher への配送をログに出す
+// debug は GAYA_DEBUG 時に flagsChanged の受信と watcher への配送をログに出す
 // (「キーは押されているのにバーが出ない」型の切り分け用)。
-var debug = os.Getenv("URATALK_DEBUG") != ""
+var debug = os.Getenv("GAYA_DEBUG") != ""
 
 // watcher は監視 1 件。held が 0 なら単体キー、非 0 なら「held のビットが
 // 立っている(=その修飾キーを押しながら)ときの押下だけ」を流すコード監視。

@@ -4,44 +4,44 @@
 
 ```sh
 make            # ターゲット一覧(help)
-make build      # bin/ura-talk を生成
-make app        # build/ura-talk.app を生成して署名
+make build      # bin/gaya を生成
+make app        # build/gaya.app を生成して署名
 make app-open   # ビルドして .app を起動
 make restart    # 起動中の .app を停止して開き直す(再ビルドはしない)
-make dist       # 配布用に .app を zip 化(dist/ura-talk.app.zip)
+make dist       # 配布用に .app を zip 化(dist/gaya.app.zip)
 make clean      # bin / .app を削除
 make logs       # .app のログを追尾(tail -f)
 ```
 
 > 端末から直接動作確認するなら `go run . dryrun` / `go run . devices` / `go run . overlay-demo`。ただしメニューバー常駐(ホットキー)の権限は署名済み `.app` に紐づくので、実挙動の確認は `make app-open` を使う。
 
-Go 1.26.4+ が必要。Finder/`.app` 起動では作業ディレクトリが `/` になるため、設定は `~/.config/ura-talk/config.json` を読む。ログは `.app` 起動時 `~/Library/Logs/ura-talk.log`(パーミッション `0600`)、端末起動時は標準エラー。発話本文は既定でログに残さず(文字数のみ)、`URATALK_DEBUG=1` のときだけ本文を出す。多重起動はファイルロックで防止。
+Go 1.26.4+ が必要。Finder/`.app` 起動では作業ディレクトリが `/` になるため、設定は `~/.config/gaya/config.json` を読む。ログは `.app` 起動時 `~/Library/Logs/gaya.log`(パーミッション `0600`)、端末起動時は標準エラー。発話本文は既定でログに残さず(文字数のみ)、`GAYA_DEBUG=1` のときだけ本文を出す。多重起動はファイルロックで防止。
 
 ### 配布用ビルド
 
-`make dist` が `dist/ura-talk.app.zip` を作る。ビルド環境の無いメンバーに配れる。ただし **自己署名/アドホック署名**なので、受け取った人は初回のみ Gatekeeper を通す必要がある:
+`make dist` が `dist/gaya.app.zip` を作る。ビルド環境の無いメンバーに配れる。ただし **自己署名/アドホック署名**なので、受け取った人は初回のみ Gatekeeper を通す必要がある:
 
 - 解凍した .app を **「アプリケーション」フォルダへ移動してから**、Finder で**右クリック →「開く」**(以後は普通に起動できる)
-- またはターミナルで `xattr -dr com.apple.quarantine /path/to/ura-talk.app`
+- またはターミナルで `xattr -dr com.apple.quarantine /path/to/gaya.app`
 
 移動せず quarantine 付きのまま開くと **App Translocation**(パスランダム化)でホットキーが効かなくなる。アプリ側でも検知して警告ダイアログを出す(`warnIfTranslocated`)。
 
-起動後にアクセシビリティ権限を許可する。設定ファイルが無ければ初回起動時にコメント付きの雛形(config.example.json を埋め込んだもの)を `~/.config/ura-talk/config.json` へ自動生成し、メニューの「設定ファイルを開く…」から編集できる(反映はメニューの「再起動」)。whisper が未設定・未導入でも落ちず、文字入力のみで動く。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
+起動後にアクセシビリティ権限を許可する。設定ファイルが無ければ初回起動時にコメント付きの雛形(config.example.json を埋め込んだもの)を `~/.config/gaya/config.json` へ自動生成し、メニューの「設定ファイルを開く…」から編集できる(反映はメニューの「再起動」)。whisper が未設定・未導入でも落ちず、文字入力のみで動く。音声も使う人は別途 `brew install whisper-cpp` とモデルが必要。
 
 **GitHub Release**: `make release VERSION=v1.2.3` でタグを push すると、[release.yml](../.github/workflows/release.yml) がテスト → `make dist` → zip を Release に添付する(ローカルの未コミット変更・テスト失敗があれば release は中断される)。`VERSION=patch / minor / major` を渡すと直近のタグから該当の桁を 1 つ上げたバージョンを自動計算する(確認プロンプト付き。例: v0.2.4 で `patch` → v0.2.5)。
 
-Release の署名には secrets の自己署名証明書 **`ura-talk-dist`**(`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`)を使う。毎リリース同じ身元になるため、**利用者が付与した権限がアプリ更新後も失効しない**。secrets が未設定でもアドホック署名にフォールバックして Release 自体は作られる(その場合は更新のたびに権限の再付与が必要)。証明書を作り直す(=身元が変わる)と全員が権限を付与し直しになる点に注意。
+Release の署名には secrets の自己署名証明書 **`gaya-dist`**(`MACOS_SIGN_P12` / `MACOS_SIGN_P12_PASSWORD`)を使う。毎リリース同じ身元になるため、**利用者が付与した権限がアプリ更新後も失効しない**。secrets が未設定でもアドホック署名にフォールバックして Release 自体は作られる(その場合は更新のたびに権限の再付与が必要)。証明書を作り直す(=身元が変わる)と全員が権限を付与し直しになる点に注意。
 
 > 不特定多数に配るなら Apple Developer ID による署名 + notarization が必要(この構成では未対応)。社内・小チームでの共有を想定。
 
 ### 署名(権限を失効・バッティングさせない)
 
-`make app` はキーチェーンにある **`ura-talk-dist`(配布ビルドと同一の身元)→ `ura-talk-dev`** の順で自動選択して署名する。どちらも無ければアドホック署名にフォールバックするが、その場合は再ビルドのたびに身元が変わって**付与済みの権限が失効**する。別名を使うなら `make app SIGN_IDENTITY="名前"`。
+`make app` はキーチェーンにある **`gaya-dist`(配布ビルドと同一の身元)→ `gaya-dev`** の順で自動選択して署名する。どちらも無ければアドホック署名にフォールバックするが、その場合は再ビルドのたびに身元が変わって**付与済みの権限が失効**する。別名を使うなら `make app SIGN_IDENTITY="名前"`。
 
-TCC(アクセシビリティ等)の許可は**バンドル ID+署名**に紐づくため、署名の違うビルド(例: ローカルの dev 署名と配布版の dist 署名)を行き来すると許可を取り合って「トグルは ON なのに効かない」状態になる。ローカルにも `ura-talk-dist.p12` をインポートして身元を統一するのが推奨:
+TCC(アクセシビリティ等)の許可は**バンドル ID+署名**に紐づくため、署名の違うビルド(例: ローカルの dev 署名と配布版の dist 署名)を行き来すると許可を取り合って「トグルは ON なのに効かない」状態になる。ローカルにも `gaya-dist.p12` をインポートして身元を統一するのが推奨:
 
 ```sh
-security import ura-talk-dist.p12 -k ~/Library/Keychains/login.keychain-db -P <パスワード> -T /usr/bin/codesign
+security import gaya-dist.p12 -k ~/Library/Keychains/login.keychain-db -P <パスワード> -T /usr/bin/codesign
 ```
 
 権限が有効かはアプリが起動時に検査し、無効ならシステムの許可ダイアログとログで知らせる(署名の違う旧ビルドへの許可が残っている場合は、システム設定で一度削除してから追加し直す)。
@@ -50,7 +50,7 @@ security import ura-talk-dist.p12 -k ~/Library/Keychains/login.keychain-db -P <�
 
 ```sh
 go test ./internal/...                                   # 単体テスト
-URATALK_E2E_SERVER=https://<your>.workers.dev go test ./internal/room -run E2E   # 実サーバ相手の疎通
+GAYA_E2E_SERVER=https://<your>.workers.dev go test ./internal/room -run E2E   # 実サーバ相手の疎通
 cd server && npm test                                    # 中継サーバ(vitest)
 ```
 
@@ -124,7 +124,7 @@ server/                          ルームの中継サーバ(Cloudflare Workers 
 - **コメントを書ける**(JSONC)。`//` 行コメント・`/* */` ブロックコメント・末尾カンマを許可する
 - トップレベルは主従を反映したブロック構成: `room`(オーバーレイ共有)+ `input_hotkey`(文字入力バー)が主、`voice`(音声入力)と `whisper`(文字起こし)がサブ。ほかに `sound`(効果音)・`enhance`(Ollama 整形)・`emoji`
 - 旧スキーマ(`voice_input` / `whisper_model` などトップレベルのフラットなキー、`room.input_hotkey`)の config もそのまま読める(新キーが優先)
-- 環境変数 `URATALK_ROOM_SERVER` / `URATALK_WHISPER_MODEL` / `URATALK_SLACK_BOT_TOKEN` / `URATALK_CONFIG` で上書き可能
+- 環境変数 `GAYA_ROOM_SERVER` / `GAYA_WHISPER_MODEL` / `GAYA_SLACK_BOT_TOKEN` / `GAYA_CONFIG` で上書き可能
 
 ## ロードマップ
 

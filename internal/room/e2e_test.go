@@ -9,14 +9,14 @@ import (
 
 // TestE2ERelay は実サーバ(wrangler dev かデプロイ済み Workers)に対して
 // 作成→2 クライアント参加→送信→両方(送信者含む)に届く、を通しで確認する。
-// 環境変数 URATALK_E2E_SERVER が無ければスキップする:
+// 環境変数 GAYA_E2E_SERVER が無ければスキップする:
 //
 //	cd server && npx wrangler dev --port 8787   # 別端末で
-//	URATALK_E2E_SERVER=http://localhost:8787 go test ./internal/room -run E2E -v
+//	GAYA_E2E_SERVER=http://localhost:8787 go test ./internal/room -run E2E -v
 func TestE2ERelay(t *testing.T) {
-	server := os.Getenv("URATALK_E2E_SERVER")
+	server := os.Getenv("GAYA_E2E_SERVER")
 	if server == "" {
-		t.Skip("URATALK_E2E_SERVER が未設定のためスキップ")
+		t.Skip("GAYA_E2E_SERVER が未設定のためスキップ")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -78,11 +78,11 @@ func TestE2ERelay(t *testing.T) {
 }
 
 // TestE2ERevoke は実サーバに対して 作成→参加→無効化→切断+再参加不可 を通しで確認する。
-// 実行方法は TestE2ERelay と同じ(URATALK_E2E_SERVER が無ければスキップ)。
+// 実行方法は TestE2ERelay と同じ(GAYA_E2E_SERVER が無ければスキップ)。
 func TestE2ERevoke(t *testing.T) {
-	server := os.Getenv("URATALK_E2E_SERVER")
+	server := os.Getenv("GAYA_E2E_SERVER")
 	if server == "" {
-		t.Skip("URATALK_E2E_SERVER が未設定のためスキップ")
+		t.Skip("GAYA_E2E_SERVER が未設定のためスキップ")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

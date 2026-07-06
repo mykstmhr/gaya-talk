@@ -49,7 +49,7 @@ type VoiceConfig struct {
 	ListenMode string `json:"listen_mode"`
 	// Device は録音に使う入力デバイス名(部分一致)。空ならシステム既定。
 	// Bluetooth イヤホン以外(内蔵マイク等)を指定すると、イヤホンが通話モードに
-	// 切り替わって再生音が途切れるのを防げる。`ura-talk devices` で候補を確認できる。
+	// 切り替わって再生音が途切れるのを防げる。`gaya devices` で候補を確認できる。
 	Device string `json:"device"`
 	// VAD は無音区切りのパラメータ(listen_mode が "vad" のとき有効)。
 	VAD VADConfig `json:"vad"`
@@ -115,17 +115,17 @@ func (m *VoiceMode) UnmarshalJSON(b []byte) error {
 
 // RoomConfig は room(ライブコメントオーバーレイ共有)の設定。
 type RoomConfig struct {
-	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://ura-talk-room.<name>.workers.dev"。
+	// Server は中継サーバ(Cloudflare Workers)の URL。例 "https://gaya-room.<name>.workers.dev"。
 	// 空でもオーバーレイ自体は動く(ルーム未参加=自分の画面にだけ流れるソロモード)。
 	Server string `json:"server"`
 	// CreateSecret はルーム作成時の認証シークレット。サーバ側で CREATE_SECRET を設定して
-	// いる場合に必要(参加だけなら不要)。環境変数 URATALK_ROOM_CREATE_SECRET でも渡せる。
+	// いる場合に必要(参加だけなら不要)。環境変数 GAYA_ROOM_CREATE_SECRET でも渡せる。
 	CreateSecret string `json:"create_secret"`
 	// DisplayName は記名モードのルームで名乗る表示名(空なら記名ルームでも匿名)。
 	DisplayName string `json:"display_name"`
 	// SlackBotToken は Slack ミラー(コメントをチャンネルへ転送)に使う bot token(xoxb)。
 	// 設定した人だけがミラー役になれる。空ならミラー機能は出ない。
-	// 環境変数 URATALK_SLACK_BOT_TOKEN でも渡せる(config に平文で書きたくない場合)。
+	// 環境変数 GAYA_SLACK_BOT_TOKEN でも渡せる(config に平文で書きたくない場合)。
 	SlackBotToken string `json:"slack_bot_token"`
 	// SlackChannel は Slack ミラーの投稿先チャンネル(ID "C0123..." 推奨、"#general" も可)。
 	// ルーム作成時にチャンネルを尋ねる際の既定値。実際の記録先はルームごとに URL に載る。
@@ -189,8 +189,8 @@ func (h Hotkey) String() string {
 	return strings.Join(append(append([]string{}, h.Mods...), h.Key), "+")
 }
 
-// Load は設定を読み込む。検索順は環境変数 URATALK_CONFIG → ./config.json →
-// ~/.config/ura-talk/config.json。見つからない項目はデフォルトを使う。
+// Load は設定を読み込む。検索順は環境変数 GAYA_CONFIG → ./config.json →
+// ~/.config/gaya/config.json。見つからない項目はデフォルトを使う。
 func Load() (*Config, error) {
 	cfg := &Config{
 		Room:        RoomConfig{},
@@ -236,16 +236,16 @@ func Load() (*Config, error) {
 		}
 	}
 
-	if v := os.Getenv("URATALK_ROOM_SERVER"); v != "" {
+	if v := os.Getenv("GAYA_ROOM_SERVER"); v != "" {
 		cfg.Room.Server = v
 	}
-	if v := os.Getenv("URATALK_WHISPER_MODEL"); v != "" {
+	if v := os.Getenv("GAYA_WHISPER_MODEL"); v != "" {
 		cfg.Whisper.Model = v
 	}
-	if v := os.Getenv("URATALK_SLACK_BOT_TOKEN"); v != "" {
+	if v := os.Getenv("GAYA_SLACK_BOT_TOKEN"); v != "" {
 		cfg.Room.SlackBotToken = v
 	}
-	if v := os.Getenv("URATALK_ROOM_CREATE_SECRET"); v != "" {
+	if v := os.Getenv("GAYA_ROOM_CREATE_SECRET"); v != "" {
 		cfg.Room.CreateSecret = v
 	}
 	cfg.Whisper.Model = expandHome(cfg.Whisper.Model)
@@ -253,16 +253,16 @@ func Load() (*Config, error) {
 }
 
 // Path は Load が読む設定ファイルのパスを返す(まだ存在しなくてもパスは返す)。
-// 検索順: 環境変数 URATALK_CONFIG → ./config.json → ~/.config/ura-talk/config.json。
+// 検索順: 環境変数 GAYA_CONFIG → ./config.json → ~/.config/gaya/config.json。
 func Path() string {
-	if p := os.Getenv("URATALK_CONFIG"); p != "" {
+	if p := os.Getenv("GAYA_CONFIG"); p != "" {
 		return p
 	}
 	if _, err := os.Stat("config.json"); err == nil {
 		return "config.json"
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".config", "ura-talk", "config.json")
+		return filepath.Join(home, ".config", "gaya", "config.json")
 	}
 	return ""
 }

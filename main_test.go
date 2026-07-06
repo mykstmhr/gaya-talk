@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mykstmhr/ura-talk/internal/config"
+	"github.com/mykstmhr/gaya/internal/config"
 )
 
 func TestTruncRunes(t *testing.T) {
@@ -29,9 +29,9 @@ func TestTruncRunes(t *testing.T) {
 }
 
 func TestBodyForLog(t *testing.T) {
-	// 既定(URATALK_DEBUG なし)では発話本文をログに出さず文字数だけにする。
-	t.Setenv("URATALK_DEBUG", "")
-	os.Unsetenv("URATALK_DEBUG") // t.Setenv で復元は担保しつつ、空でなく未設定にする
+	// 既定(GAYA_DEBUG なし)では発話本文をログに出さず文字数だけにする。
+	t.Setenv("GAYA_DEBUG", "")
+	os.Unsetenv("GAYA_DEBUG") // t.Setenv で復元は担保しつつ、空でなく未設定にする
 	body := "会議の機微な発言"
 	got := bodyForLog(body)
 	if strings.Contains(got, body) {
@@ -41,7 +41,7 @@ func TestBodyForLog(t *testing.T) {
 		t.Errorf("文字数(8)を含むはず: %q", got)
 	}
 
-	t.Setenv("URATALK_DEBUG", "1")
+	t.Setenv("GAYA_DEBUG", "1")
 	if got := bodyForLog(body); !strings.Contains(got, body) {
 		t.Errorf("デバッグ時は本文を出すはず: %q", got)
 	}

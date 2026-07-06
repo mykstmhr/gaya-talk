@@ -1,6 +1,6 @@
-# ura-talk-room
+# gaya-room
 
-ura-talk の「ルーム」機能のための WebSocket リレーサーバ(Cloudflare Workers + Durable Objects)。
+gaya の「ルーム」機能のための WebSocket リレーサーバ(Cloudflare Workers + Durable Objects)。
 
 参加者が送った E2E 暗号化済みメッセージを、同じルームの全参加者(送信者自身を含む)にそのままブロードキャストする。サーバは本文を復号できず、保存もしない(保存するのはルームごとの管理メタデータ = 管理シークレットのハッシュとタイムスタンプだけ)。
 
@@ -35,7 +35,7 @@ ura-talk の「ルーム」機能のための WebSocket リレーサーバ(Cloud
 npx wrangler secret put CREATE_SECRET   # 任意の文字列を設定
 ```
 
-設定後は、ルームを作成する人だけがクライアント側の config(`room.create_secret` または環境変数 `URATALK_ROOM_CREATE_SECRET`)に同じ値を設定する。参加だけのメンバーには不要。
+設定後は、ルームを作成する人だけがクライアント側の config(`room.create_secret` または環境変数 `GAYA_ROOM_CREATE_SECRET`)に同じ値を設定する。参加だけのメンバーには不要。
 
 ## 開発
 

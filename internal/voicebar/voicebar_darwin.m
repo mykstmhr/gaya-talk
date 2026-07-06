@@ -111,7 +111,7 @@ static UTVoiceBarUnit* vbBuildUnit(void) {
     p.hasShadow = YES;
     p.level = NSScreenSaverWindowLevel;
     // NSPanel は既定 hidesOnDeactivate=YES で、非アクティブなアプリのパネルを隠す。
-    // ura-talk は常駐の背景アプリ(ほぼ常に非アクティブ)なので、切らないとバーが出ない。
+    // gaya は常駐の背景アプリ(ほぼ常に非アクティブ)なので、切らないとバーが出ない。
     p.hidesOnDeactivate = NO;
     p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
         | NSWindowCollectionBehaviorFullScreenAuxiliary

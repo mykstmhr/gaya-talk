@@ -1,5 +1,5 @@
 # v* タグを push すると .app を zip 化して GitHub Release に添付する。
-# 署名は secrets の自己署名証明書 ura-talk-dist(MACOS_SIGN_P12 / 同 _PASSWORD)で行う。
+# 署名は secrets の自己署名証明書 gaya-dist(MACOS_SIGN_P12 / 同 _PASSWORD)で行う。
 # 毎リリース同じ身元になるため、利用者が付与したアクセシビリティ等の権限が
 # アプリ更新後も失効しない。secrets 未設定ならアドホック署名にフォールバックする
 # (その場合は更新のたびに権限の再付与が必要)。
@@ -50,25 +50,25 @@ jobs:
       - name: 配布用 zip を作成
         # BUILD_VERSION はタグ(shallow checkout では git describe が使えない)。
         # BUILD_KIND=release でメニューに「リリース版」と出し、自己アップデートを有効にする。
-        run: make dist SIGN_IDENTITY=ura-talk-dist BUILD_VERSION="$GITHUB_REF_NAME" BUILD_KIND=release
+        run: make dist SIGN_IDENTITY=gaya-dist BUILD_VERSION="$GITHUB_REF_NAME" BUILD_KIND=release
       - name: Release を作成して zip を添付
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
-          files: dist/ura-talk.app.zip
+          files: dist/gaya.app.zip
           generate_release_notes: true
           body: |
             macOS (Apple Silicon) 用です。**ターミナルで 1 コマンドが簡単**(`gh` 経由なら Gatekeeper の警告が出ません。アップデートも同じコマンド):
 
             ```sh
-            d="$(mktemp -d)" && gh release download --repo mykstmhr/ura-talk --pattern ura-talk.app.zip --dir "$d" \
-              && { pkill -x ura-talk 2>/dev/null; sleep 1; rm -rf /Applications/ura-talk.app; } \
-              && ditto -x -k "$d/ura-talk.app.zip" /Applications \
-              && open /Applications/ura-talk.app
+            d="$(mktemp -d)" && gh release download --repo mykstmhr/gaya --pattern gaya.app.zip --dir "$d" \
+              && { pkill -x gaya 2>/dev/null; sleep 1; rm -rf /Applications/gaya.app; } \
+              && ditto -x -k "$d/gaya.app.zip" /Applications \
+              && open /Applications/gaya.app
             ```
             (このコマンドは README のものと同一です。変更するときは両方更新してください)
 
-            ブラウザでダウンロードした場合は、解凍した `ura-talk.app` を**「アプリケーション」フォルダへ移動**してから開いてください(ダウンロードフォルダのまま開くとホットキーが効きません)。「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通せます。
+            ブラウザでダウンロードした場合は、解凍した `gaya.app` を**「アプリケーション」フォルダへ移動**してから開いてください(ダウンロードフォルダのまま開くとホットキーが効きません)。「ブロックしました」と出たら、システム設定 → プライバシーとセキュリティ最下部の「このまま開く」で通せます。
 
             起動したら**アクセシビリティ権限**を許可 → メニューバーの「ルームに URL で参加…」に招待 URL を貼るだけです。
-            - 設定ファイルは初回起動時に `~/.config/ura-talk/config.json` に自動生成されます(メニューの「設定ファイルを開く…」から編集できます)
+            - 設定ファイルは初回起動時に `~/.config/gaya/config.json` に自動生成されます(メニューの「設定ファイルを開く…」から編集できます)
             - 声も使う場合は別途 `brew install whisper-cpp` とモデルが必要です(リポジトリの README 参照)

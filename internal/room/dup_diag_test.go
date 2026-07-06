@@ -13,9 +13,9 @@ import (
 // ちょうど 1 回ずつ届くこと(重複・欠落なし)を確認する診断テスト。
 // 再接続を挟んだ場合の挙動も見るため、途中で片方を Leave→Join し直す。
 func TestE2ENoDuplicates(t *testing.T) {
-	server := os.Getenv("URATALK_E2E_SERVER")
+	server := os.Getenv("GAYA_E2E_SERVER")
 	if server == "" {
-		t.Skip("URATALK_E2E_SERVER が未設定のためスキップ")
+		t.Skip("GAYA_E2E_SERVER が未設定のためスキップ")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

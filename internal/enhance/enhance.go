@@ -128,8 +128,8 @@ func (e *Enhancer) EnsureServer(ctx context.Context) (started bool, err error) {
 	}
 	dedicated := !strings.HasSuffix(endpointHostPort(e.cfg.Endpoint), ":11434")
 	if e.reachable(ctx) {
-		// 専用ポートで既に動いているものは前回(クラッシュ等)の ura-talk の残骸なので、
-		// 引き取って終了時に止める対象にする(専用ポートは ura-talk しか使わない前提)。
+		// 専用ポートで既に動いているものは前回(クラッシュ等)の gaya の残骸なので、
+		// 引き取って終了時に止める対象にする(専用ポートは gaya しか使わない前提)。
 		e.managed.Store(dedicated)
 		return false, nil
 	}
@@ -155,7 +155,7 @@ func (e *Enhancer) EnsureServer(ctx context.Context) (started bool, err error) {
 //
 // 既定の 11434 のとき: ユーザーが他アプリと共有している標準インスタンスなので、
 // Ollama.app があればそれを開き、無ければ切り離して起動して残す(所有しない)。
-// 専用ポート(既定 11477 等)のとき: ura-talk 専用インスタンスとして OLLAMA_HOST を
+// 専用ポート(既定 11477 等)のとき: gaya 専用インスタンスとして OLLAMA_HOST を
 // 指定して子プロセスで起動し、所有する(StopServer / アプリ終了時に止める)。
 func (e *Enhancer) startServer() error {
 	hostPort := endpointHostPort(e.cfg.Endpoint)
@@ -175,7 +175,7 @@ func (e *Enhancer) startServer() error {
 	cmd := exec.Command(bin, "serve")
 	// Stdout/Stderr を nil のままにすると /dev/null に接続される(ログを捨てる)。
 	cmd.Env = append(os.Environ(), "OLLAMA_HOST="+hostPort)
-	// どちらの場合も ura-talk のプロセスグループから切り離す(親の SIGKILL に巻き込まれて
+	// どちらの場合も gaya のプロセスグループから切り離す(親の SIGKILL に巻き込まれて
 	// 中途半端に死なないように)。専用ポートぶんの停止は StopServer がポートから特定して行う。
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {

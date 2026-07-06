@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mykstmhr/ura-talk/internal/dialog"
+	"github.com/mykstmhr/gaya/internal/dialog"
 
 	"fyne.io/systray"
 )
@@ -27,7 +27,7 @@ var (
 )
 
 // releaseRepo は自己アップデートの取得元(gh release の --repo に渡す)。
-const releaseRepo = "mykstmhr/ura-talk"
+const releaseRepo = "mykstmhr/gaya"
 
 // versionString はメニュー・ログ表示用の「v0.2.4(リリース版)」を返す。
 func versionString() string {
@@ -116,10 +116,10 @@ func checkAndUpdate() {
 func selfUpdate(gh string) error {
 	script := `
 d="$(mktemp -d)" || exit 1
-"$1" release download --repo ` + releaseRepo + ` --pattern ura-talk.app.zip --dir "$d" || exit 1
-i=0; while pgrep -x ura-talk >/dev/null 2>&1 && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
-rm -rf /Applications/ura-talk.app
-ditto -x -k "$d/ura-talk.app.zip" /Applications && open /Applications/ura-talk.app
+"$1" release download --repo ` + releaseRepo + ` --pattern gaya.app.zip --dir "$d" || exit 1
+i=0; while pgrep -x gaya >/dev/null 2>&1 && [ $i -lt 30 ]; do sleep 1; i=$((i+1)); done
+rm -rf /Applications/gaya.app
+ditto -x -k "$d/gaya.app.zip" /Applications && open /Applications/gaya.app
 `
 	cmd := exec.Command("/bin/sh", "-c", script, "sh", gh)
 	// 本体の終了(quitApp)に巻き込まれないようプロセスグループを切り離す。

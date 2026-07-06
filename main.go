@@ -1,4 +1,4 @@
-// ura-talk: グローバルなホットキーでマイクを録音し、ローカルの whisper-cli で
+// gaya: グローバルなホットキーでマイクを録音し、ローカルの whisper-cli で
 // 文字起こしして、画面全体のオーバーレイにライブコメントとして流す
 // 常駐ツール。同じルームに参加したメンバー間でコメントを共有できる(中継サーバ経由)。
 //
@@ -7,11 +7,11 @@
 //
 // 使い方:
 //
-//	ura-talk              常駐を開始する(メニューバーに常駐)
-//	ura-talk dryrun       送信せず、文字起こし結果をログに出すだけ(動作確認用)
-//	ura-talk devices      利用可能な入力デバイス(マイク)の一覧を表示する
-//	ura-talk keys         ホットキーに指定できるキー名の一覧を表示する
-//	ura-talk overlay-demo ルームを使わずオーバーレイの見た目だけ確認する
+//	gaya              常駐を開始する(メニューバーに常駐)
+//	gaya dryrun       送信せず、文字起こし結果をログに出すだけ(動作確認用)
+//	gaya devices      利用可能な入力デバイス(マイク)の一覧を表示する
+//	gaya keys         ホットキーに指定できるキー名の一覧を表示する
+//	gaya overlay-demo ルームを使わずオーバーレイの見た目だけ確認する
 package main
 
 import (
@@ -31,19 +31,19 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mykstmhr/ura-talk/internal/audioout"
-	"github.com/mykstmhr/ura-talk/internal/config"
-	"github.com/mykstmhr/ura-talk/internal/dialog"
-	"github.com/mykstmhr/ura-talk/internal/enhance"
-	"github.com/mykstmhr/ura-talk/internal/inputbar"
-	"github.com/mykstmhr/ura-talk/internal/modkey"
-	"github.com/mykstmhr/ura-talk/internal/overlay"
-	"github.com/mykstmhr/ura-talk/internal/recorder"
-	"github.com/mykstmhr/ura-talk/internal/transcribe"
-	"github.com/mykstmhr/ura-talk/internal/trayicon"
-	"github.com/mykstmhr/ura-talk/internal/vad"
-	"github.com/mykstmhr/ura-talk/internal/voicebar"
-	"github.com/mykstmhr/ura-talk/internal/voicegate"
+	"github.com/mykstmhr/gaya/internal/audioout"
+	"github.com/mykstmhr/gaya/internal/config"
+	"github.com/mykstmhr/gaya/internal/dialog"
+	"github.com/mykstmhr/gaya/internal/enhance"
+	"github.com/mykstmhr/gaya/internal/inputbar"
+	"github.com/mykstmhr/gaya/internal/modkey"
+	"github.com/mykstmhr/gaya/internal/overlay"
+	"github.com/mykstmhr/gaya/internal/recorder"
+	"github.com/mykstmhr/gaya/internal/transcribe"
+	"github.com/mykstmhr/gaya/internal/trayicon"
+	"github.com/mykstmhr/gaya/internal/vad"
+	"github.com/mykstmhr/gaya/internal/voicebar"
+	"github.com/mykstmhr/gaya/internal/voicegate"
 
 	"fyne.io/systray"
 	"golang.design/x/hotkey"
@@ -123,13 +123,13 @@ func warnIfTranslocated() {
 		return
 	}
 	log.Println("⚠️ App Translocation 下で起動しています(quarantine 付きのまま開いた)。ホットキーが使えません。アプリを移動して開き直してください。")
-	dialog.Alert("ura-talk を移動してください",
+	dialog.Alert("gaya を移動してください",
 		"Gatekeeper により一時的なパスから起動されているため、ホットキー(右⌘ など)が使えません。\n\n"+
-			"ura-talk.app を Finder で「アプリケーション」フォルダへ移動してから、開き直してください。",
+			"gaya.app を Finder で「アプリケーション」フォルダへ移動してから、開き直してください。",
 		"OK")
 }
 
-// setupLogging は、.app バンドルから起動された場合にログを ~/Library/Logs/ura-talk.log へ出す。
+// setupLogging は、.app バンドルから起動された場合にログを ~/Library/Logs/gaya.log へ出す。
 // Finder/launchd 起動では stdout が /dev/null(文字デバイス)になり stderr も失われるため、
 // 端末判定ではなく「実行ファイルが .app の中にあるか」で判定する。
 func setupLogging() {
@@ -145,7 +145,7 @@ func setupLogging() {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}
-	logPath := filepath.Join(dir, "ura-talk.log")
+	logPath := filepath.Join(dir, "gaya.log")
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
@@ -175,9 +175,9 @@ func main() {
 	case "overlay-demo":
 		runOverlayDemo()
 	case "version":
-		fmt.Println("ura-talk " + versionString())
+		fmt.Println("gaya " + versionString())
 	default:
-		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: ura-talk [run|dryrun|devices|keys|overlay-demo|version]\n", cmd)
+		fmt.Fprintf(os.Stderr, "不明なサブコマンド: %s\n使い方: gaya [run|dryrun|devices|keys|overlay-demo|version]\n", cmd)
 		os.Exit(2)
 	}
 }
@@ -230,7 +230,7 @@ func runKeys() {
 func runOverlayDemo() {
 	systray.Run(func() {
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
-		systray.SetTooltip("ura-talk overlay demo")
+		systray.SetTooltip("gaya overlay demo")
 		mQuit := systray.AddMenuItem("終了", "デモを終了する")
 		go func() {
 			<-mQuit.ClickedCh
@@ -310,8 +310,8 @@ var enhancer atomic.Pointer[enhance.Enhancer]
 // メインループを回し、その中でホットキー登録・録音・文字起こしを動かす。
 func startTray(dryRun bool) {
 	if !acquireSingleInstance() {
-		log.Println("ura-talk は既に起動しています(多重起動を防止しました)。")
-		fmt.Fprintln(os.Stderr, "ura-talk は既に起動しています。")
+		log.Println("gaya は既に起動しています(多重起動を防止しました)。")
+		fmt.Fprintln(os.Stderr, "gaya は既に起動しています。")
 		return
 	}
 	// SIGTERM / Ctrl-C でもメニューの「終了」と同じ後始末を通す
@@ -340,7 +340,7 @@ func quitApp() {
 func onReady(dryRun bool) func() {
 	return func() {
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
-		systray.SetTooltip("ura-talk " + version)
+		systray.SetTooltip("gaya " + version)
 
 		// 主軸のルーム操作を最上部に(serve から Show する)。
 		addRoomMenuItems()
@@ -364,7 +364,7 @@ func onReady(dryRun bool) func() {
 			<-mRestart.ClickedCh
 			restartApp()
 		}()
-		mQuit := systray.AddMenuItem("終了", "ura-talk を終了する")
+		mQuit := systray.AddMenuItem("終了", "gaya を終了する")
 		go func() {
 			<-mQuit.ClickedCh
 			quitApp()
@@ -494,7 +494,7 @@ func (t *trayStatus) apply() {
 	if n > 0 {
 		st = "文字起こし中…"
 	}
-	systray.SetTooltip("ura-talk — " + st)
+	systray.SetTooltip("gaya — " + st)
 
 	// 画面下部のバー。文字入力バーが開いている間は同じ場所を譲る(閉じたら復帰)。
 	if cfg == nil || !cfg.Voice.Bar {
@@ -520,11 +520,11 @@ func acquireSingleInstance() bool {
 	if err != nil {
 		return true // 判定できないときは通す
 	}
-	dir := filepath.Join(home, "Library", "Application Support", "ura-talk")
+	dir := filepath.Join(home, "Library", "Application Support", "gaya")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return true
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "ura-talk.lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	f, err := os.OpenFile(filepath.Join(dir, "gaya.lock"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return true
 	}
@@ -540,7 +540,7 @@ func acquireSingleInstance() bool {
 // systray のメインループ上(別 goroutine)で動く。dryRun のときは送らず表示のみ。
 func serve(dryRun bool) {
 	// 「どのビルドが動いているか」を調査の起点にできるよう、必ずログの先頭付近に残す。
-	log.Printf("ura-talk %s 起動", versionString())
+	log.Printf("gaya %s 起動", versionString())
 	warnIfTranslocated()
 	ensureDefaultConfig()
 	cfg, err := config.Load()
@@ -715,13 +715,13 @@ func serve(dryRun bool) {
 	}
 
 	if cfg.Voice.ListenMode == "vad" {
-		log.Printf("ura-talk 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Voice.Hotkey)
+		log.Printf("gaya 起動 [%s / VAD]。[%s] で聞き取り開始/停止。話すと無音で自動区切りして流します。", out.name, cfg.Voice.Hotkey)
 		tray.setBase(iconIdle, "待機中…", "")
 		vadLoop(rec, wh, out, cfg, down)
 		return
 	}
 
-	log.Printf("ura-talk 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Voice.Hotkey)
+	log.Printf("gaya 起動 [%s / PTT]。[%s] を押している間だけ録音します。", out.name, cfg.Voice.Hotkey)
 	tray.setBase(iconIdle, "待機中…", "")
 	pttLoop(rec, wh, out, cfg, down, up)
 }
@@ -932,7 +932,7 @@ func pttLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 
 // vadLoop はキーでリッスンをトグルし、その間ストリームを無音で発話単位に区切って流す。
 func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *config.Config, down <-chan struct{}) {
-	debug := os.Getenv("URATALK_DEBUG") != ""
+	debug := os.Getenv("GAYA_DEBUG") != ""
 	seg := vad.New(vad.Config{
 		SampleRate:   recorder.SampleRate,
 		Threshold:    cfg.Voice.VAD.Threshold,
@@ -1012,11 +1012,11 @@ func vadLoop(rec *recorder.Recorder, wh transcribe.Whisper, out output, cfg *con
 	}
 }
 
-// logBodyEnabled は発話本文をログに出してよいか(URATALK_DEBUG が設定されているか)。
-// 既定では発話内容(会議・機微な発言になりうる)を永続ログ ~/Library/Logs/ura-talk.log に
+// logBodyEnabled は発話本文をログに出してよいか(GAYA_DEBUG が設定されているか)。
+// 既定では発話内容(会議・機微な発言になりうる)を永続ログ ~/Library/Logs/gaya.log に
 // 平文で残さない。デバッグ時のみ本文を出す。
 func logBodyEnabled() bool {
-	return os.Getenv("URATALK_DEBUG") != ""
+	return os.Getenv("GAYA_DEBUG") != ""
 }
 
 // bodyForLog は本文をログ用に整形する。デバッグ時は本文そのもの、通常時は
@@ -1101,7 +1101,7 @@ func handle(wh transcribe.Whisper, out output, cfg *config.Config, pcm []byte) {
 		log.Printf("送信失敗(%s): %v", out.name, err)
 		return
 	}
-	// 発話本文は既定でログに残さない(URATALK_DEBUG のときだけ本文を出す)。
+	// 発話本文は既定でログに残さない(GAYA_DEBUG のときだけ本文を出す)。
 	log.Printf("→ %s: %s", out.name, bodyForLog(text))
 }
 
@@ -1124,7 +1124,7 @@ func parseHotkey(h config.Hotkey) ([]hotkey.Modifier, hotkey.Key, error) {
 	}
 	key, ok := keyMap[strings.ToLower(h.Key)]
 	if !ok {
-		return nil, 0, fmt.Errorf("未知のキー: %q(対応キーは `ura-talk keys` で確認)", h.Key)
+		return nil, 0, fmt.Errorf("未知のキー: %q(対応キーは `gaya keys` で確認)", h.Key)
 	}
 	return mods, key, nil
 }

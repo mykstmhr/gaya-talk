@@ -19,7 +19,7 @@ import (
 
 // Room は参加先ルームの情報(共有 URL から得られるもの)。
 type Room struct {
-	Server string // 例 "https://ura-talk-room.example.workers.dev"
+	Server string // 例 "https://gaya-room.example.workers.dev"
 	Token  string // ルームトークン(base64url 22文字)
 	Key    []byte // AES-256-GCM 鍵(32 バイト)
 	Named  bool   // 記名モードか(#...&n=1)

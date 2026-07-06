@@ -16,13 +16,13 @@ type Store struct {
 // New はディレクトリ dir を使う Store を返す(ファイルは dir/display_name)。
 func New(dir string) *Store { return &Store{dir: dir} }
 
-// DefaultDir は ~/Library/Application Support/ura-talk を返す(多重起動ロックと同じ場所)。
+// DefaultDir は ~/Library/Application Support/gaya を返す(多重起動ロックと同じ場所)。
 func DefaultDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(home, "Library", "Application Support", "ura-talk"), nil
+	return filepath.Join(home, "Library", "Application Support", "gaya"), nil
 }
 
 // Load は保存済みの表示名を返す(無ければ空)。前後の空白は落とす。
