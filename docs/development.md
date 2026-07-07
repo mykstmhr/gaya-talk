@@ -79,4 +79,3 @@ server/                          中継サーバ(Cloudflare Workers + Durable Ob
 
 **各キーの説明と既定値は [config.example.json](../config.example.json) のコメントが正**。JSONC(コメント・末尾カンマ可)。旧スキーマのキーもそのまま読める。環境変数 `GAYATALK_CONFIG` / `GAYATALK_ROOM_SERVER` / `GAYATALK_WHISPER_MODEL` / `GAYATALK_SLACK_BOT_TOKEN` / `GAYATALK_ROOM_CREATE_SECRET` で上書き可能。
 
-設計の経緯は [room-overlay-design.md](room-overlay-design.md)(歴史的記録)を参照。

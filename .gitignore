@@ -13,3 +13,6 @@ build/*.app/
 # ローカル環境(グローバル ignore 頼みにしない: 他の環境でも誤コミットを防ぐ)
 .DS_Store
 .envrc
+
+# 初期設計の記録(手元にだけ残す。現行仕様は development.md と config.example.json が正)
+docs/room-overlay-design.md
