@@ -32,6 +32,10 @@ static const CGFloat kTopMargin = 44;  // 画面上端からの余白(メニュ�
 
 static NSMutableArray<NSWindow *> *gWins = nil;
 
+// gShared は画面共有・収録にオーバーレイを映すか。既定 NO(映さない)が安全側:
+// 再起動でも必ず NO に戻る(オンのまま忘れて次の会議でコメントが映る事故を防ぐ)。
+static BOOL gShared = NO;
+
 // モニターごとのレーン状態。「次のコメントを流し始めてよい時刻」を持つ。
 // 全コメント同速なので、前のコメントの尻尾(+kGap)が画面右端に入り切る時刻まで
 // 待てば重ならない。
@@ -52,8 +56,9 @@ static NSWindow* overlayBuildWindow(void) {
 	w.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
 		| NSWindowCollectionBehaviorFullScreenAuxiliary
 		| NSWindowCollectionBehaviorStationary;
-	// 画面共有・スクリーンショットに映さない(コメントを会議相手に見せない)。
-	w.sharingType = NSWindowSharingNone;
+	// 画面共有・スクリーンショットに映すかは gShared に従う(既定は映さない =
+	// コメントを会議相手に見せない。メニューから切り替え可)。
+	w.sharingType = gShared ? NSWindowSharingReadOnly : NSWindowSharingNone;
 	w.releasedWhenClosed = NO;
 	NSView *v = [[NSView alloc] initWithFrame:w.frame];
 	v.wantsLayer = YES;
@@ -88,6 +93,17 @@ static void overlaySync(void) {
 		}
 		[w orderFrontRegardless];
 	}
+}
+
+// overlaySetShared は画面共有・収録への表示を切り替える(既存ウィンドウにも即反映)。
+static void overlaySetShared(int on) {
+	dispatch_async(dispatch_get_main_queue(), ^{
+		gShared = on ? YES : NO;
+		if (!gWins) return;
+		for (NSWindow *w in gWins) {
+			w.sharingType = gShared ? NSWindowSharingReadOnly : NSWindowSharingNone;
+		}
+	});
 }
 
 static void overlayStart(void) {
@@ -225,6 +241,16 @@ import (
 // AppKit のメインループ(systray.Run)が動いていることが前提。
 func Start() {
 	C.overlayStart()
+}
+
+// SetShared は画面共有・収録にコメントを映すかを切り替える(既定は映さない)。
+// 入力バー・音声バーには影響しない(それらは常に映らない)。
+func SetShared(on bool) {
+	v := C.int(0)
+	if on {
+		v = 1
+	}
+	C.overlaySetShared(v)
 }
 
 // Show はコメントを 1 件、全モニターで右から左へ流す。color は "#rrggbb"(不正なら白)。
