@@ -140,4 +140,31 @@ func addVersionMenuItems() {
 			checkAndUpdate()
 		}
 	}()
+	go watchUpdates(mUpdate)
+}
+
+// watchUpdates は起動直後と 24 時間ごとに新バージョンを静かに確認し、見つけたら
+// メニュー項目のラベルに出す(ダイアログは出さない。実行は従来どおりクリックで確認)。
+// gh が無い・オフライン等の失敗は黙ってスキップする(手動確認時にだけ理由を出す)。
+func watchUpdates(mUpdate *systray.MenuItem) {
+	check := func() {
+		gh := ghBin()
+		if gh == "" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		latest, err := latestReleaseTag(ctx, gh)
+		if err != nil || latest == version {
+			return
+		}
+		mUpdate.SetTitle("⬆️ " + latest + " にアップデート…")
+		log.Printf("⬆️ 新しいバージョン %s があります(現在 %s)。メニューから更新できます。", latest, version)
+	}
+	// 起動直後は他の初期化(Ollama 起動等)と競合しないよう少し待つ。
+	time.Sleep(15 * time.Second)
+	check()
+	for range time.Tick(24 * time.Hour) {
+		check()
+	}
 }

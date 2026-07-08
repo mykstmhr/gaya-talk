@@ -24,6 +24,13 @@ var Listen []byte // リッスン中(吹き出し+音波・テンプレート)
 // 赤は録音中の点滅で使うため、リッスンはオレンジにして区別する。
 var ListenOn = tint(Listen, color.RGBA{R: 0xFF, G: 0x95, B: 0x00, A: 0xFF})
 
+// IdleShared / ListenShared は「画面共有にコメントを映している」間の赤版。
+// 外に見えている状態を常時視覚で示す(オンのまま忘れる事故の防止)。
+var (
+	IdleShared   = tint(Idle, color.RGBA{R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF})
+	ListenShared = tint(Listen, color.RGBA{R: 0xFF, G: 0x3B, B: 0x30, A: 0xFF})
+)
+
 // tint は src(PNG)の不透明度(アルファ)を保ったまま RGB を c に塗り替えた PNG を返す。
 // アンチエイリアスのエッジを残すため形状はアルファで表現する。失敗時は src をそのまま返す。
 func tint(src []byte, c color.RGBA) []byte {

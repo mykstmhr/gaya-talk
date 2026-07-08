@@ -29,6 +29,14 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      - name: Format check
+        # 手元の gofmt 忘れを CI で検出する(整形して直せの案内付き)
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt が必要です:"; echo "$files"; exit 1
+          fi
+
       - name: Test
         run: go test ./...
 

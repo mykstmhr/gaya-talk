@@ -1,4 +1,4 @@
-.PHONY: help build clean setup setup-voice app app-open dist release model whisper-model enhance-model restart logs deploy icons uninstall
+.PHONY: help build clean setup setup-voice app app-open dist release model verify-model whisper-model enhance-model restart logs deploy icons uninstall
 
 # 素の `make` はヘルプを表示する(誤って setup を走らせないため)。
 .DEFAULT_GOAL := help
@@ -25,6 +25,25 @@ APP := build/gaya-talk.app
 MODEL_DIR := $(HOME)/.config/gaya-talk/models
 MODEL := ggml-large-v3-turbo.bin
 MODEL_URL := https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$(MODEL)
+
+# 既知モデルの SHA-256(Hugging Face の LFS メタデータより)。ダウンロード後に検証し、
+# 配布元の侵害・すり替え・破損を検出する(モデルはネイティブコードに食わせるデータなので)。
+# 一覧にないモデル名は検証をスキップする(その旨を表示)。
+model_sha256 = $(strip \
+  $(if $(filter ggml-large-v3-turbo.bin,$(1)),1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69,\
+  $(if $(filter ggml-large-v3.bin,$(1)),64d182b440b98d5203c4f9bd541544d84c605196c4f7b845dfa11fb23594d1e2,\
+  $(if $(filter ggml-large-v3-turbo-q5_0.bin,$(1)),394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2,))))
+
+# verify_model: $(1)=ファイルパス $(2)=期待ハッシュ(空ならスキップ)。不一致ならファイルを消して失敗。
+define verify_model
+	if [ -n "$(2)" ]; then \
+	  echo "$(2)  $(1)" | shasum -a 256 -c - >/dev/null 2>&1 \
+	    || { echo "⚠️ チェックサム不一致のため削除しました(配布元の変更か破損): $(1)"; rm -f "$(1)"; exit 1; }; \
+	  echo "✅ チェックサム OK: $(notdir $(1))"; \
+	else \
+	  echo "ℹ️ 既知のハッシュが無いため検証をスキップ: $(notdir $(1))"; \
+	fi
+endef
 
 # 設定ファイルの置き場(.app はここを読む)。setup が配置し、enhance-model が model を書き換える。
 CONFIG := $(HOME)/.config/gaya-talk/config.json
@@ -184,6 +203,10 @@ logs: ## .app のログ(~/Library/Logs/gaya-talk.log)を tail -f で追う
 
 # whisper モデルを ~/.config/gaya-talk/models/ にダウンロードする(既定 turbo、既にあれば skip)。
 # 特定モデルを直接指定するとき: make model MODEL=ggml-large-v3.bin
+# verify-model は MODEL のチェックサムを検証する内部ターゲット(whisper-model から呼ぶ)。
+verify-model:
+	@$(call verify_model,$(MODEL_DIR)/$(MODEL),$(call model_sha256,$(MODEL)))
+
 model: ## whisper モデルを直接指定して取得(make model MODEL=<file>)
 	@mkdir -p $(MODEL_DIR)
 	@if [ -f "$(MODEL_DIR)/$(MODEL)" ]; then \
@@ -191,6 +214,7 @@ model: ## whisper モデルを直接指定して取得(make model MODEL=<file>)
 	else \
 	  echo "ダウンロード中: $(MODEL_URL)"; \
 	  curl -L --fail -o "$(MODEL_DIR)/$(MODEL)" "$(MODEL_URL)"; \
+	  $(call verify_model,$(MODEL_DIR)/$(MODEL),$(call model_sha256,$(MODEL))); \
 	  echo "保存: $(MODEL_DIR)/$(MODEL)"; \
 	fi
 
@@ -212,6 +236,7 @@ whisper-model: ## whisper モデルを番号で選び直す(config も更新)
 	else \
 	  echo "→ $$m をダウンロードします"; \
 	  curl -L --fail -o "$(MODEL_DIR)/$$m" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/$$m" || { echo "ダウンロード失敗"; exit 1; }; \
+	  $(MAKE) --no-print-directory verify-model MODEL="$$m" || exit 1; \
 	  echo "保存: $(MODEL_DIR)/$$m"; \
 	fi; \
 	if [ -f "$(CONFIG)" ]; then \

@@ -227,6 +227,7 @@ func runKeys() {
 
 // runOverlayDemo は room 機能を使わずにオーバーレイの見た目だけ確認する。
 // サンプルコメントをランダム間隔で流し続ける(メニューバーの「終了」で止める)。
+// デモは画面収録に映る(README 用の GIF などを撮れるよう、共有オンで動かす)。
 func runOverlayDemo() {
 	systray.Run(func() {
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
@@ -238,6 +239,7 @@ func runOverlayDemo() {
 		}()
 
 		overlay.Start()
+		overlay.SetShared(true) // デモは収録できてこそ(本番の既定は映らないまま)
 		go func() {
 			samples := []struct{ text, color string }{
 				{"それな", "#ffffff"},
@@ -366,11 +368,13 @@ func onReady(dryRun bool) func() {
 				if mShareOverlay.Checked() {
 					mShareOverlay.Uncheck()
 					overlay.SetShared(false)
+					tray.setShared(false)
 					log.Println("🙈 コメントは画面共有に映りません(既定)。")
 					overlay.Show("画面共有への表示: オフ", "#ffcc00")
 				} else {
 					mShareOverlay.Check()
 					overlay.SetShared(true)
+					tray.setShared(true) // 見えている間はアイコンを赤にして忘れを防ぐ
 					log.Println("📺 コメントを画面共有・収録に映します(オフに戻すまで)。")
 					overlay.Show("📺 画面共有への表示: オン(コメントが相手に見えます)", "#ffcc00")
 				}
@@ -449,6 +453,15 @@ type trayStatus struct {
 	barText      string // バーの主ラベル(リッスン系の状態のときだけ非空)
 	transcribing int
 	inputOpen    bool // 文字入力バーが開いている間は音声バーを引っ込める(同じ場所に出るため)
+	shared       bool // 画面共有にコメントを映している間はアイコンを赤にする(見えている状態の常時シグナル)
+}
+
+// setShared は「画面共有にコメントを映しているか」を反映する。
+func (t *trayStatus) setShared(on bool) {
+	t.mu.Lock()
+	t.shared = on
+	t.mu.Unlock()
+	t.apply()
 }
 
 // setInputOpen は文字入力バーの開閉を反映する(開いている間は音声バーを出さない)。
@@ -497,13 +510,20 @@ func (t *trayStatus) endTranscribe() {
 func (t *trayStatus) apply() {
 	t.mu.Lock()
 	icon, menuText, barText, n, cfg := t.baseIcon, t.baseText, t.barText, t.transcribing, t.cfg
-	inputOpen := t.inputOpen
+	inputOpen, shared := t.inputOpen, t.shared
 	t.mu.Unlock()
 
-	// メニューバー: マイクが生きているときだけオレンジ。それ以外は黒テンプレート。
-	if icon == iconListen || icon == iconRec {
+	// メニューバー: 画面共有に映している間は赤(外に見えている警告。最優先)、
+	// マイクが生きていればオレンジ、それ以外は黒テンプレート。
+	mic := icon == iconListen || icon == iconRec
+	switch {
+	case shared && mic:
+		systray.SetIcon(trayicon.ListenShared)
+	case shared:
+		systray.SetIcon(trayicon.IdleShared)
+	case mic:
 		systray.SetIcon(trayicon.ListenOn)
-	} else {
+	default:
 		systray.SetTemplateIcon(trayicon.Idle, trayicon.Idle)
 	}
 
@@ -512,6 +532,9 @@ func (t *trayStatus) apply() {
 	st := menuText
 	if n > 0 {
 		st = "文字起こし中…"
+	}
+	if shared {
+		st += "(画面共有にコメント表示中)"
 	}
 	systray.SetTooltip("gaya-talk — " + st)
 
