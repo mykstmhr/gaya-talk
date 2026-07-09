@@ -1,8 +1,9 @@
 # gaya-talk
 
-会議や発表の本線を邪魔せずに、実況コメントを流す macOS 常駐ツール。声やキー入力をその場で文字にして、画面全体の透過オーバーレイに右から左へ流す。同じルームに参加したメンバーの画面にも同じコメントが流れる。
+自分のモニターにライブ実況コメントを流す macOS 常駐ツール。声やキー入力をその場で文字にして、画面全体の透過オーバーレイに右から左へ流す。同じルームに参加したメンバーの画面にも同じコメントが流れる。
 
-- どのビデオツールの上でも動き、**画面共有・収録には映らない**(クリックも下のアプリへ素通し)。視聴者に見せたいときはメニューの「画面共有にコメントを映す」でオンにできる(再起動でオフに戻る)
+- 常に最前面の透過レイヤーとして、どのアプリの上にも重なる(クリックは下のアプリへ素通し)
+- 自分のモニターに流すだけなので、**画面共有・収録にはオーバーレイは映らず、共有する画面を散らかさない**。相手にも見せたいときはメニューの「画面共有にコメントを映す」でオン(再起動でオフに戻る)
 - 本文は **E2E 暗号化**。文字起こし(whisper.cpp)・整形(Ollama)もローカル完結で、音声・本文は外部サービスに渡らない
 - macOS (Apple Silicon) 専用
 
@@ -10,10 +11,11 @@
 
 ## インストール
 
-ターミナルで 1 コマンド(要 [gh](https://cli.github.com/)。private repo のため認証必須。**アップデートも同じコマンド**):
+ターミナルで 1 コマンド(認証不要。**アップデートも同じコマンド**):
 
 ```sh
-d="$(mktemp -d)" && gh release download --repo mykstmhr/gaya-talk --pattern gaya-talk.app.zip --dir "$d" \
+d="$(mktemp -d)" && curl -fL -o "$d/gaya-talk.app.zip" \
+    https://github.com/mykstmhr/gaya-talk/releases/latest/download/gaya-talk.app.zip \
   && { pkill -x gaya-talk 2>/dev/null; sleep 1; rm -rf /Applications/gaya-talk.app; } \
   && ditto -x -k "$d/gaya-talk.app.zip" /Applications \
   && open /Applications/gaya-talk.app

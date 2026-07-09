@@ -362,7 +362,7 @@ func onReady(dryRun bool) func() {
 		// 画面共有への表示は毎回オフで始める(オンのまま忘れて次の会議でコメントが
 		// 映る事故を防ぐため、あえて永続化しない)。入力バー・音声バーは常に映らない。
 		mShareOverlay := systray.AddMenuItemCheckbox("画面共有にコメントを映す",
-			"オンにするとオーバーレイのコメントが画面共有・収録に映る(視聴者に見せながら発表する用)。再起動でオフに戻る", false)
+			"オンにするとオーバーレイのコメントが画面共有・収録に映る(相手にも見せながら流したいとき用)。再起動でオフに戻る", false)
 		go func() {
 			for range mShareOverlay.ClickedCh {
 				if mShareOverlay.Checked() {

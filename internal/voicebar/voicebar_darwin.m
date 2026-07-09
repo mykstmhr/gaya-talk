@@ -116,7 +116,7 @@ static UTVoiceBarUnit* vbBuildUnit(void) {
     p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
         | NSWindowCollectionBehaviorFullScreenAuxiliary
         | NSWindowCollectionBehaviorStationary;
-    p.sharingType = NSWindowSharingNone;   // 画面共有に映さない(裏トークを隠す)
+    p.sharingType = NSWindowSharingNone;   // 画面共有に映さない(自分の共有画面にバーを出さない)
     p.ignoresMouseEvents = YES;            // クリックは下のアプリへ素通し
     p.releasedWhenClosed = NO;
 
