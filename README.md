@@ -1,13 +1,25 @@
+<div align="center">
+
 # gaya-talk
 
-自分のモニターにライブ実況コメントを流す macOS 常駐ツール。声やキー入力をその場で文字にして、画面全体の透過オーバーレイに右から左へ流す。同じルームに参加したメンバーの画面にも同じコメントが流れる。
+声もキー入力も、その場でコメントになって画面を右から左へ流れていく。
+同じルームに参加したメンバー全員のモニターに、同じコメントが流れる。
 
-- 常に最前面の透過レイヤーとして、どのアプリの上にも重なる(クリックは下のアプリへ素通し)
-- 自分のモニターに流すだけなので、**画面共有・収録にはオーバーレイは映らず、共有する画面を散らかさない**。相手にも見せたいときはメニューの「画面共有にコメントを映す」でオン(再起動でオフに戻る)
-- 本文は **E2E 暗号化**。文字起こし(whisper.cpp)・整形(Ollama)もローカル完結で、音声・本文は外部サービスに渡らない
-- macOS (Apple Silicon) 専用
+[![release](https://img.shields.io/github/v/release/mykstmhr/gaya-talk)](https://github.com/mykstmhr/gaya-talk/releases/latest)
+[![CI](https://github.com/mykstmhr/gaya-talk/actions/workflows/ci.yml/badge.svg)](https://github.com/mykstmhr/gaya-talk/actions/workflows/ci.yml)
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-詳しく: [ホストガイド](docs/hosting.md)(ルーム作成・Slack 記録)/ [開発者ガイド](docs/development.md)(ビルド・アーキテクチャ)
+[ホストガイド](docs/hosting.md) · [開発者ガイド](docs/development.md)
+
+</div>
+
+## 特徴
+
+- **相手には見えない** — オーバーレイは画面共有・収録に映らない。共有中の真面目な画面はそのままに、こちら側だけ賑やかにできる。相手にも見せたいときだけメニューでオン(再起動でオフに戻る)
+- **操作を邪魔しない** — 常に最前面だが、クリックは下のアプリへ素通し。`⌥+クリック` で流れているコメントのコピーだけ拾う
+- **本文は E2E 暗号化** — 鍵は共有 URL の `#` 以降に載り、中継サーバは本文を読めない
+- **音声もローカル完結** — 文字起こし(whisper.cpp)も整形(Ollama)も手元の Mac で動き、音声・本文は外部サービスに渡らない
 
 ## インストール
 
