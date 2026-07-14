@@ -299,9 +299,14 @@ func buildSink(cfg *config.Config, dryRun bool) output {
 // lockFile は多重起動防止のロックを保持する(プロセス終了まで開いたままにする)。
 var lockFile *os.File
 
-// mInfoKeys はメニュー下部のキー情報行(例「入力バー : 右⌘ / 音声 : 右⇧+右⌘」)。
+// メニュー下部の「操作方法」ブロック(ヘッダ + 字下げした操作 1 つにつき 1 行)。
 // 状態(待機/聞き取り…)はメニューには出さず、アイコン色・画面下部のバー・ツールチップが担う。
-var mInfoKeys *systray.MenuItem
+var (
+	mInfoOps   *systray.MenuItem // ヘッダ「操作方法」
+	mInfoInput *systray.MenuItem // 文字入力のキー
+	mInfoVoice *systray.MenuItem // 音声入力のキー(音声オフ設定なら出さない)
+	mInfoCopy  *systray.MenuItem // コメントコピーの操作
+)
 
 // enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化する。
 // serve goroutine が書き、quitApp(シグナル/メニューの goroutine)が読むため atomic。
@@ -348,8 +353,11 @@ func onReady(dryRun bool) func() {
 		addRoomMenuItems()
 
 		systray.AddSeparator()
-		// キー情報は下部に 1 行だけ(内容は serve で確定して Show する)。
-		mInfoKeys = newInfoItem()
+		// 操作方法は下部にまとめる(内容は serve で確定して Show する)。
+		mInfoOps = newInfoItem()
+		mInfoInput = newInfoItem()
+		mInfoVoice = newInfoItem()
+		mInfoCopy = newInfoItem()
 		// 何が起動しているか(バージョン・リリース版/ローカルビルド)を常に見えるように。
 		addVersionMenuItems()
 		addNameMenuItem()
@@ -789,20 +797,22 @@ func applyVoiceAuto(cfg *config.Config) {
 	updateKeyInfo(cfg)
 }
 
-// updateKeyInfo はメニュー下部のキー情報行を現在の状態に合わせて更新する。
-// 例「入力バー : 右⌘ / 音声 : 右⇧+右⌘」。音声が使えない理由(スピーカー出力中)も
-// この行に集約する。
+// updateKeyInfo はメニュー下部の「操作方法」ブロックを現在の状態に合わせて更新する。
+// 音声が使えない理由(スピーカー出力中)も音声入力の行に集約する。
 func updateKeyInfo(cfg *config.Config) {
-	line := "入力バー : " + prettyHotkey(cfg.InputHotkey)
+	setInfo(mInfoOps, "操作方法")
+	setInfo(mInfoInput, "　文字入力 : "+prettyHotkey(cfg.InputHotkey))
 	switch {
 	case cfg.Voice.Input == config.VoiceOff:
-		// 文字入力のみ(音声のキーは出さない)
+		if mInfoVoice != nil { // setInfo と同じく未生成に備える
+			mInfoVoice.Hide() // 文字入力のみ(音声のキーは出さない)
+		}
 	case cfg.Voice.Input == config.VoiceAuto && !voice.Allowed():
-		line += " / 音声 : オフ(スピーカー出力中)"
+		setInfo(mInfoVoice, "　音声入力 : オフ(スピーカー出力中)")
 	default:
-		line += " / 音声 : " + prettyHotkey(cfg.Voice.Hotkey)
+		setInfo(mInfoVoice, "　音声入力 : "+prettyHotkey(cfg.Voice.Hotkey))
 	}
-	setInfo(mInfoKeys, line)
+	setInfo(mInfoCopy, "　コメントコピー : ⌥+コメントをクリック")
 }
 
 // prettyHotkey はホットキーをメニュー表示用の記号(右⌘ 等)に変換する。
