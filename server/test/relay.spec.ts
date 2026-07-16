@@ -277,6 +277,24 @@ describe("GET /r/<token>(接続数の取得)", () => {
     expect(missing.status).toBe(403);
   });
 
+  it("心拍(ping)はエッジが pong を自動応答し、他の参加者へは中継されない", async () => {
+    const { token, adminSecret } = await createRoom();
+    const a = await openWs(token);
+    const b = await openWs(token);
+
+    a.ws.send("ping");
+    await waitFor(() => a.received.includes("pong"));
+    expect(b.received).toEqual([]); // 心拍はブロードキャストを汚さない
+
+    // 心拍を打った直後のソケットは接続数に数えられる
+    const res = await SELF.fetch(`https://example.com/r/${token}`, {
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    expect(await res.json()).toEqual({ connections: 2 });
+    a.ws.close();
+    b.ws.close();
+  });
+
   it("存在しないルームは 404、無効化済みは 410", async () => {
     const none = await SELF.fetch("https://example.com/r/AAAAAAAAAAAAAAAAAAAAAA", {
       headers: { Authorization: "Bearer AAAAAAAAAAAAAAAAAAAAAA" },

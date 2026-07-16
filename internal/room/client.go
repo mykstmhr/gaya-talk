@@ -302,7 +302,10 @@ func (c *Client) run(ctx context.Context, r *Room, gen uint64) {
 		log.Println("✅ ルームに接続しました")
 		backoff = time.Second
 
+		hbCtx, hbCancel := context.WithCancel(ctx)
+		go heartbeat(hbCtx, conn)
 		c.readLoop(ctx, conn, r)
+		hbCancel()
 
 		c.mu.Lock()
 		if c.conn == conn {
@@ -313,6 +316,33 @@ func (c *Client) run(ctx context.Context, r *Room, gen uint64) {
 			return
 		}
 		log.Println("⚠️ ルームから切断されました。再接続します…")
+	}
+}
+
+// heartbeatInterval は心拍の間隔。サーバは「3 拍(90 秒)途絶えたら sleep 中と
+// みなして接続数から外す」ので、変えるならサーバの HEARTBEAT_STALE_MS と揃える
+// (テストが差し替えられるよう var にしてある)。
+var heartbeatInterval = 30 * time.Second
+
+// heartbeat は接続が生きている間、"ping" テキストを定期送信する。サーバは
+// エッジで "pong" を自動応答し(DO は起きない)、他の参加者へは中継されない。
+// sleep で無言になった接続をサーバ側の人数計測から外すための生存信号。
+// 送信失敗はここでは扱わない(切断は readLoop が検知して再接続する)。
+func heartbeat(ctx context.Context, conn *websocket.Conn) {
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			err := conn.Write(wctx, websocket.MessageText, []byte("ping"))
+			cancel()
+			if err != nil {
+				return
+			}
+		}
 	}
 }
 

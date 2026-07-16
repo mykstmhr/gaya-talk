@@ -32,6 +32,10 @@ const MAX_CONNECTIONS_PER_ROOM = 32;
 const DEFAULT_IDLE_TTL_DAYS = 7;
 // メッセージ起因の lastActive 書き込みはこの間隔まで間引く(接続時は毎回書く)
 const ACTIVITY_WRITE_INTERVAL_MS = 60 * 60 * 1000;
+// クライアントは 30 秒ごとに心拍("ping" テキスト)を送る。これがこの時間途絶えた
+// ソケットは接続数に数えず閉じる(sleep した Mac の接続は TCP 上なにも言わずに
+// 消えるため、エッジには「開いたまま」でしばらく残る)。3 拍ぶんの余裕を持たせる
+const HEARTBEAT_STALE_MS = 90_000;
 
 function generateToken(): string {
   const bytes = new Uint8Array(16);
@@ -110,6 +114,14 @@ interface Meta {
 }
 
 export class Room extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    // クライアントの心拍("ping")にはエッジが DO を起こさず "pong" を返す。
+    // auto-response に食われるので webSocketMessage には届かず、中継も
+    // レートリミット消費もされない(= 心拍のコストは実質ゼロ)。
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
   // POST /rooms から RPC で呼ばれ、ルームを有効化する。
   // 既に初期化済みなら何もしない(128bit 乱数の衝突は実質起きないが、
   // 万一のとき既存ルームの管理者を上書きさせないため)
@@ -201,8 +213,26 @@ export class Room extends DurableObject<Env> {
     if (meta.revoked) {
       return new Response("Room revoked or expired", { status: 410 });
     }
-    // getWebSockets() はハイバネーション中の接続も含めて数える
-    return Response.json({ connections: this.ctx.getWebSockets().length });
+    // 心拍(auto-response の最終応答時刻)が新しいソケットだけ数える。
+    // timestamp が null なのは接続直後(初回 ping 前)か旧クライアントで、
+    // 生死を判定できないので数に入れる。getWebSockets() はハイバネーション中
+    // の接続も含めて列挙する
+    const now = Date.now();
+    let connections = 0;
+    for (const ws of this.ctx.getWebSockets()) {
+      const seen = this.ctx.getWebSocketAutoResponseTimestamp(ws);
+      if (seen && now - seen.getTime() > HEARTBEAT_STALE_MS) {
+        // ついでに掃除する(sleep したまま残ったゾンビが接続上限を食い潰さないように)
+        try {
+          ws.close(1001, "heartbeat timeout");
+        } catch {
+          // すでに閉じている場合は無視
+        }
+        continue;
+      }
+      connections++;
+    }
+    return Response.json({ connections });
   }
 
   // 墓標(revoked)を立て、接続中の全ソケットを閉じる。管理者による無効化と

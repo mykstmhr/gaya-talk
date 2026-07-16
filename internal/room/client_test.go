@@ -9,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/coder/websocket"
 )
 
 func TestCreateParsesTokenAndAdminSecret(t *testing.T) {
@@ -161,6 +163,45 @@ func TestStatusRequiresAdminSecret(t *testing.T) {
 	r := &Room{Server: "https://relay.example", Token: "abcdefghijKLMNOPQRST12"}
 	if _, err := Status(context.Background(), r); err == nil {
 		t.Error("シークレットなしでエラーにならない")
+	}
+}
+
+// TestHeartbeat は接続中、心拍("ping" テキスト)が定期送信されることを確認する。
+func TestHeartbeat(t *testing.T) {
+	old := heartbeatInterval
+	heartbeatInterval = 20 * time.Millisecond
+	defer func() { heartbeatInterval = old }()
+
+	pings := make(chan string, 16)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			t.Errorf("accept: %v", err)
+			return
+		}
+		defer conn.CloseNow()
+		for {
+			_, data, err := conn.Read(context.Background())
+			if err != nil {
+				return
+			}
+			pings <- string(data)
+		}
+	}))
+	defer ts.Close()
+
+	key := make([]byte, 32)
+	c := &Client{}
+	c.Join(&Room{Server: ts.URL, Token: "abcdefghijKLMNOPQRST12", Key: key})
+	defer c.Leave()
+
+	select {
+	case got := <-pings:
+		if got != "ping" {
+			t.Errorf("受信 = %q, want %q", got, "ping")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("ping が届かない")
 	}
 }
 
