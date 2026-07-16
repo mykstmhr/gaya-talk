@@ -91,6 +91,46 @@ func Revoke(ctx context.Context, r *Room) error {
 	}
 }
 
+// Status はルームの現在の同時接続数を返す(作成者のみ)。接続数はサーバが中継の
+// ために元々持っているメタデータで、これを見ても本文の秘匿性(E2E)は変わらない。
+func Status(ctx context.Context, r *Room) (int, error) {
+	if r.AdminSecret == "" {
+		return 0, fmt.Errorf("管理シークレットがありません(接続数を見られるのはルームの作成者だけです)")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		fmt.Sprintf("%s/r/%s", trimSlash(r.Server), r.Token), nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Authorization", "Bearer "+r.AdminSecret)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("接続数の取得に失敗(サーバ %s に届きません): %w", r.Server, err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusForbidden:
+		return 0, fmt.Errorf("接続数を取得できません(管理シークレットが一致しません)")
+	case http.StatusNotFound:
+		return 0, fmt.Errorf("ルームがサーバに存在しません")
+	case http.StatusGone:
+		return 0, fmt.Errorf("ルームは無効化または失効しています")
+	default:
+		return 0, fmt.Errorf("接続数の取得に失敗: HTTP %d", resp.StatusCode)
+	}
+	var out struct {
+		Connections int `json:"connections"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return 0, fmt.Errorf("接続数レスポンスの解析に失敗: %w", err)
+	}
+	if out.Connections < 0 {
+		return 0, fmt.Errorf("サーバが不正な接続数を返しました: %d", out.Connections)
+	}
+	return out.Connections, nil
+}
+
 func trimSlash(s string) string {
 	for len(s) > 0 && s[len(s)-1] == '/' {
 		s = s[:len(s)-1]

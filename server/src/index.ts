@@ -77,9 +77,10 @@ export default {
       return stub.fetch(request);
     }
 
-    // ルームの無効化(作成者のみ)。Authorization: Bearer <adminSecret>
+    // ルームの無効化(DELETE)と接続数の取得(GET)。どちらも作成者のみ
+    // (Authorization: Bearer <adminSecret>)
     const roomMatch = url.pathname.match(ROOM_PATH_RE);
-    if (request.method === "DELETE" && roomMatch) {
+    if ((request.method === "DELETE" || request.method === "GET") && roomMatch) {
       const stub = env.ROOM.get(env.ROOM.idFromName(roomMatch[1]));
       return stub.fetch(request);
     }
@@ -130,6 +131,11 @@ export class Room extends DurableObject<Env> {
     }
 
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      // Upgrade の無い GET は接続数の取得。ブラウザで共有 URL を開いただけの
+      // アクセスもここに来るが、管理シークレットが無ければ 403 で終わる
+      if (request.method === "GET") {
+        return this.status(request);
+      }
       return new Response("Expected WebSocket", { status: 426 });
     }
 
@@ -162,19 +168,41 @@ export class Room extends DurableObject<Env> {
     return new Response(null, { status: 101, webSocket: client });
   }
 
+  // 管理シークレット(Authorization: Bearer)が meta のハッシュと一致するか。
+  private async authorized(request: Request, meta: Meta): Promise<boolean> {
+    const auth = request.headers.get("Authorization") ?? "";
+    const secret = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+    return secret !== "" && (await sha256Hex(secret)) === meta.adminHash;
+  }
+
   // ルームを無効化し、接続中の全ソケットを閉じる。
   private async revoke(request: Request): Promise<Response> {
     const meta = await this.ctx.storage.get<Meta>("meta");
     if (!meta) {
       return new Response("Room not found", { status: 404 });
     }
-    const auth = request.headers.get("Authorization") ?? "";
-    const secret = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
-    if (secret === "" || (await sha256Hex(secret)) !== meta.adminHash) {
+    if (!(await this.authorized(request, meta))) {
       return new Response("Forbidden", { status: 403 });
     }
     await this.markRevoked(meta);
     return new Response(null, { status: 204 });
+  }
+
+  // 現在の同時接続数を返す(作成者のみ)。接続数はサーバが中継のために元々
+  // 持っているメタデータなので、これを出しても本文の秘匿性(E2E)は変わらない。
+  private async status(request: Request): Promise<Response> {
+    const meta = await this.ctx.storage.get<Meta>("meta");
+    if (!meta) {
+      return new Response("Room not found", { status: 404 });
+    }
+    if (!(await this.authorized(request, meta))) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    if (meta.revoked) {
+      return new Response("Room revoked or expired", { status: 410 });
+    }
+    // getWebSockets() はハイバネーション中の接続も含めて数える
+    return Response.json({ connections: this.ctx.getWebSockets().length });
   }
 
   // 墓標(revoked)を立て、接続中の全ソケットを閉じる。管理者による無効化と

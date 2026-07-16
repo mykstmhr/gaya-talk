@@ -250,6 +250,48 @@ describe("DELETE /r/<token>(無効化)", () => {
   });
 });
 
+describe("GET /r/<token>(接続数の取得)", () => {
+  it("管理シークレットが一致すれば現在の接続数を返す", async () => {
+    const { token, adminSecret } = await createRoom();
+    const auth = { Authorization: `Bearer ${adminSecret}` };
+
+    const before = await SELF.fetch(`https://example.com/r/${token}`, { headers: auth });
+    expect(before.status).toBe(200);
+    expect(await before.json()).toEqual({ connections: 0 });
+
+    const a = await openWs(token);
+    const b = await openWs(token);
+    const after = await SELF.fetch(`https://example.com/r/${token}`, { headers: auth });
+    expect(await after.json()).toEqual({ connections: 2 });
+    a.ws.close();
+    b.ws.close();
+  });
+
+  it("シークレット不一致・欠落は 403(ブラウザで共有 URL を開いただけでは見えない)", async () => {
+    const { token } = await createRoom();
+    const wrong = await SELF.fetch(`https://example.com/r/${token}`, {
+      headers: { Authorization: "Bearer AAAAAAAAAAAAAAAAAAAAAA" },
+    });
+    expect(wrong.status).toBe(403);
+    const missing = await SELF.fetch(`https://example.com/r/${token}`);
+    expect(missing.status).toBe(403);
+  });
+
+  it("存在しないルームは 404、無効化済みは 410", async () => {
+    const none = await SELF.fetch("https://example.com/r/AAAAAAAAAAAAAAAAAAAAAA", {
+      headers: { Authorization: "Bearer AAAAAAAAAAAAAAAAAAAAAA" },
+    });
+    expect(none.status).toBe(404);
+
+    const { token, adminSecret } = await createRoom();
+    await patchMeta(token, { revoked: true });
+    const revoked = await SELF.fetch(`https://example.com/r/${token}`, {
+      headers: { Authorization: `Bearer ${adminSecret}` },
+    });
+    expect(revoked.status).toBe(410);
+  });
+});
+
 describe("Room ブロードキャスト", () => {
   it("送信者自身を含む全参加者にメッセージが届く", async () => {
     const { token } = await createRoom();

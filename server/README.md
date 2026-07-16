@@ -10,6 +10,7 @@ gaya-talk の「ルーム」機能のための WebSocket リレーサーバ(Clou
 |---|---|
 | `POST /rooms` | ルームを作成し `{"token":"...","adminSecret":"..."}` を返す(どちらも base64url 22 文字)。`adminSecret` は無効化用で、作成者だけが保持する(共有 URL には載せない)。サーバに `CREATE_SECRET` が設定されている場合は `Authorization: Bearer <CREATE_SECRET>` が必要(欠落・不一致は 401) |
 | `GET /r/<token>/ws` | WebSocket にアップグレードし、トークンに対応するルームへ接続 |
+| `GET /r/<token>` | 現在の同時接続数を `{"connections":N}` で返す(`Authorization: Bearer <adminSecret>`。作成者のみ)。接続数はサーバが中継のために元々持つメタデータで、本文の秘匿性(E2E)には影響しない |
 | `DELETE /r/<token>` | ルームを無効化する(`Authorization: Bearer <adminSecret>`)。全参加者を切断し、以後の接続を拒否する。元に戻せない |
 
 制約:

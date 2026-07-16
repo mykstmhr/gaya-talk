@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand/v2"
 	"os"
@@ -46,6 +47,7 @@ var (
 	mRoomCreateNamed *systray.MenuItem
 	mRoomJoin        *systray.MenuItem
 	mRoomCopyURL     *systray.MenuItem
+	mRoomCount       *systray.MenuItem
 	mRoomLeave       *systray.MenuItem
 	mRoomRevoke      *systray.MenuItem
 	mRoomName        *systray.MenuItem
@@ -61,6 +63,8 @@ func addRoomMenuItems() {
 	mRoomState.Hide()
 	mRoomCopyURL = systray.AddMenuItem("このルームの URL をコピー", "今参加しているルームの共有 URL をクリップボードへ(後から来る人を招く)")
 	mRoomCopyURL.Hide()
+	mRoomCount = systray.AddMenuItem("接続人数を確認", "このルームの今の接続数をサーバに問い合わせる(作成者のみ)")
+	mRoomCount.Hide()
 	mSlackMirror = systray.AddMenuItemCheckbox("Slack に記録", "このルームのコメントを Slack チャンネルにスレッドで転送する", false)
 	mSlackMirror.Hide()
 	mRoomLeave = systray.AddMenuItem("ルームから退出", "ルームとの接続を切る")
@@ -145,6 +149,8 @@ func setupRoom(cfg *config.Config) {
 	mRoomJoin.Show()
 	mRoomCopyURL.Show()
 	mRoomCopyURL.Disable()
+	mRoomCount.Show()
+	mRoomCount.Disable()
 	mRoomLeave.Show()
 	mRoomLeave.Disable()
 	mRoomRevoke.Show()
@@ -174,6 +180,11 @@ func setupRoom(cfg *config.Config) {
 	go func() {
 		for range mRoomCopyURL.ClickedCh {
 			copyCurrentRoomURL()
+		}
+	}()
+	go func() {
+		for range mRoomCount.ClickedCh {
+			showRoomCount()
 		}
 	}()
 	go func() {
@@ -335,6 +346,26 @@ func revokeCurrentRoom() {
 	roomClient.Leave()
 	forgetLastRoom()
 	log.Println("✅ ルームを無効化しました(以後この URL では誰も参加できません)。")
+}
+
+// showRoomCount は参加中ルームの今の接続数をサーバへ問い合わせ、オーバーレイに出す
+// (作成者のみ)。接続数はサーバが中継のために元々持っているメタデータなので、
+// これを見ても本文の秘匿性(E2E)は変わらない。
+func showRoomCount() {
+	r := roomClient.Room()
+	if r == nil {
+		log.Println("⚠️ ルームに参加していません。")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	n, err := room.Status(ctx, r)
+	if err != nil {
+		log.Printf("⚠️ %v", err)
+		return
+	}
+	log.Printf("👥 このルームの接続数: %d", n)
+	overlay.Show(fmt.Sprintf("👥 接続中 : %d 人(自分を含む)", n), "#66ccff")
 }
 
 // copyCurrentRoomURL は参加中ルームの共有 URL をクリップボードへコピーする。
@@ -647,6 +678,8 @@ func setRoomState(s room.State) {
 	joined := r != nil
 	toggle(mRoomCopyURL, joined)
 	toggle(mSlackMirror, joined && recorded)
+	// 接続数の確認と無効化は管理シークレットを持つ作成者だけ。
+	toggle(mRoomCount, joined && r.AdminSecret != "")
 	toggle(mRoomRevoke, joined && r.AdminSecret != "")
 	if !joined {
 		stopMirror() // 切断されたら記録も止める

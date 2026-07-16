@@ -2,6 +2,7 @@ package room
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -101,6 +102,64 @@ func TestRevokeErrors(t *testing.T) {
 func TestRevokeRequiresAdminSecret(t *testing.T) {
 	r := &Room{Server: "https://relay.example", Token: "abcdefghijKLMNOPQRST12"}
 	if err := Revoke(context.Background(), r); err == nil {
+		t.Error("シークレットなしでエラーにならない")
+	}
+}
+
+func TestStatus(t *testing.T) {
+	var gotAuth atomic.Value
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/r/abcdefghijKLMNOPQRST12" {
+			t.Errorf("予期しないリクエスト: %s %s", r.Method, r.URL.Path)
+		}
+		gotAuth.Store(r.Header.Get("Authorization"))
+		fmt.Fprint(w, `{"connections":3}`)
+	}))
+	defer ts.Close()
+
+	r := &Room{Server: ts.URL, Token: "abcdefghijKLMNOPQRST12", AdminSecret: "sec"}
+	n, err := Status(context.Background(), r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Errorf("connections = %d, want 3", n)
+	}
+	if got := gotAuth.Load(); got != "Bearer sec" {
+		t.Errorf("Authorization = %v", got)
+	}
+}
+
+func TestStatusErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"シークレット不一致", http.StatusForbidden, ""},
+		{"ルームなし", http.StatusNotFound, ""},
+		{"無効化・失効", http.StatusGone, ""},
+		{"サーバエラー", http.StatusInternalServerError, ""},
+		{"壊れたレスポンス", http.StatusOK, "not-json"},
+		{"負の接続数", http.StatusOK, `{"connections":-1}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer ts.Close()
+			r := &Room{Server: ts.URL, Token: "abcdefghijKLMNOPQRST12", AdminSecret: "sec"}
+			if _, err := Status(context.Background(), r); err == nil {
+				t.Error("エラーにならない")
+			}
+		})
+	}
+}
+
+func TestStatusRequiresAdminSecret(t *testing.T) {
+	r := &Room{Server: "https://relay.example", Token: "abcdefghijKLMNOPQRST12"}
+	if _, err := Status(context.Background(), r); err == nil {
 		t.Error("シークレットなしでエラーにならない")
 	}
 }
