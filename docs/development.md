@@ -32,21 +32,75 @@ make release VERSION=patch   # minor / major / v1.2.3 も可。タグ push → C
 - quarantine 付きのまま開くと App Translocation でホットキーが効かない(アプリが検知して警告を出す)。「アプリケーション」へ移動 → 右クリック→「開く」
 - 不特定多数に配るなら Developer ID + notarization が必要(未対応。社内・小チーム想定)
 
-## アーキテクチャと無料枠のコスト
+## アーキテクチャ
 
-```
-[各メンバーの Mac(クライアント)]                 [Cloudflare Workers]
- mic → VAD → whisper → LLM整形 ┐
- 右⌘ の文字入力バー ───────────┼→ AES-GCM 暗号化 → WebSocket ──→ Room (Durable Object)
-                               │                                    │ 同じルームの全接続へ
- 透過オーバーレイ ←── 復号 ←────┴──────────────────────────────────┘ ブロードキャスト(送信者含む)
- (記録役だけ) → Slack スレッドへ転送
+```mermaid
+flowchart LR
+    subgraph mac["各メンバーの Mac(クライアント)"]
+        mic["mic → VAD → whisper → LLM 整形"]
+        input["右⌘ の文字入力バー"]
+        enc["AES-GCM 暗号化<br/>(鍵は URL の #k=… のみ)"]
+        dec["復号"]
+        overlay["透過オーバーレイ"]
+        slack["Slack スレッドへ転送<br/>(記録役だけ)"]
+        mic --> enc
+        input --> enc
+        dec --> overlay
+        overlay --> slack
+    end
+    subgraph cf["Cloudflare Workers"]
+        worker["Worker(ルーティングのみ)"]
+        do["Room = Durable Object 1 つ<br/>storage は管理メタデータのみ"]
+        worker -->|"トークン → idFromName"| do
+    end
+    enc -->|"WebSocket(暗号文)"| worker
+    do -->|"全接続へブロードキャスト<br/>(送信者含むエコー)"| dec
 ```
 
 - 文字起こし・整形はローカル、本文はクライアントで暗号化。**鍵は URL のフラグメント(`#k=…`)にだけ載り、サーバには暗号文しか渡らない**(E2E)
-- サーバは本文を保存しない。ルーム = Durable Object 1 つで、storage は管理メタデータのみ。7 日未アクティブで失効(接続時の遅延評価。定期ジョブ不要)
+- サーバは本文を保存しない。復号もしない「中継するだけ」の存在
 - 自分のコメントもサーバのエコー経由で表示するため全員同じ順序。ID で重複排除
-- コストは実質「**コメント数 × 参加人数**」の DO リクエスト数(無料枠 10万/日)。5 人で 1 時間 200 コメントでも約 1,000。WebSocket Hibernation により、繋ぎっぱなしでも発言していない間は課金対象がほぼ 0
+
+### なぜ Durable Object か
+
+Durable Object(DO)とは、Cloudflare Workers の機能の一つで、**ID ごとに世界で 1 つだけ起動する、永続ストレージ付きのステートフルなインスタンス**のこと。この「1 ルーム = DO 1 インスタンス」という対応が、このアプリの要件とちょうど噛み合っている:
+
+- **ルームの全接続が 1 か所に集まる。** 通常の Worker はリクエストごとに別インスタンスで動くためステートレスな処理しかできず、「同じルームの接続一覧」を持てない。DO は同じ名前(ルームトークン)に対して**世界で 1 インスタンス**だけが起動することが保証されるので、`idFromName(token)` でルーティングするだけで全参加者のソケットが同居し、`getWebSockets()` を回すだけでブロードキャストできる。Pub/Sub 基盤や Redis を別途立てる必要がない
+- **順序が自然に一意になる。** 単一インスタンスがメッセージを直列に処理するため、全員が同じ順序でコメントを受け取る。「自分の発言もエコーで表示」できるのはこの性質のおかげ
+- **WebSocket Hibernation で「繋ぎっぱなし」が無料になる。** `acceptWebSocket()`(Hibernation API)を使うと、アイドル時に DO 本体をメモリから退避しつつ接続だけ Cloudflare 側が維持してくれる。会議アプリは「接続時間は長いが発言は疎」なので、これが無いと接続時間(duration)課金で無料枠に収まらない。レートリミット状態をソケットの attachment に持たせているのも、退避 → 復帰をまたいで残すため
+- **ストレージが付属していて、失効を遅延評価で済ませられる。** DO storage に `lastActive` を持ち、接続・発言のタイミングで「7 日超過なら失効」を判定する。ルームごとに閉じた状態なので cron などの定期ジョブが要らない。失効・無効化は削除ではなく**墓標(revoked)**として残す — `deleteAll` で消すと次の接続で DO がまっさらに再生成され、URL が復活してしまうため
+
+ルームのライフサイクル:
+
+```mermaid
+sequenceDiagram
+    participant C as クライアント
+    participant W as Worker
+    participant DO as Room (Durable Object)
+
+    C->>W: POST /rooms(CREATE_SECRET 必須時は Bearer)
+    W->>DO: init(adminSecret のハッシュ)
+    Note over DO: meta を storage へ保存<br/>(未初期化トークンは接続拒否 = タダ乗り防止)
+    W-->>C: token + adminSecret
+
+    C->>W: GET /r/{token}/ws(WebSocket Upgrade)
+    W->>DO: idFromName(token) でルーティング
+    Note over DO: 失効チェック → acceptWebSocket()<br/>(Hibernation 対応)
+
+    C->>DO: 暗号文メッセージ
+    DO-->>C: 全接続へブロードキャスト(送信者含む)
+
+    alt 7 日未アクティブ or DELETE /r/{token}
+        Note over DO: revoked = true(墓標)<br/>全ソケットを close(1008)
+        DO-->>C: 以後の接続は 410
+    end
+```
+
+### 無料枠のコスト
+
+- コストは実質「**コメント数 × 参加人数**」の DO リクエスト数(無料枠 10万/日)。5 人で 1 時間 200 コメントでも約 1,000
+- Hibernation により、繋ぎっぱなしでも発言していない間は課金対象がほぼ 0
+- ブロードキャストが O(接続数) なので、1 ルームの同時接続は 32 に制限(課金増幅の防止)。メッセージも 16KB 上限 + 接続ごとに 10 秒 30 通のレートリミット
 
 ## 構成
 
