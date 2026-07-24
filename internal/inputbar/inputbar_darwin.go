@@ -7,7 +7,8 @@
 // Enter で流したあともバーは開いたままで続けて打てる(連投用。空の Enter は何もしない)。
 // 閉じるのは Esc か再度ホットキー。日本語 IME の Enter はまず変換確定に使われ、
 // 確定済みの状態での Enter だけが送信になる(NSTextField の標準動作)。
-// パネルは sharingType=None にしてあり、入力途中の文面は画面共有に映らない。
+// パネルは sharingType=None にしてあり、入力途中の文面は画面共有に映らない
+// (例外: GAYATALK_CAPTURE 起動時だけドキュメント撮影用に映る)。
 //
 // ObjC 実装は inputbar_darwin.m 側(cgo preamble に ObjC クラスを書くと重複シンボルになるため)。
 package inputbar

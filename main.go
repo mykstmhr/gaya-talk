@@ -369,8 +369,16 @@ func onReady(dryRun bool) func() {
 		}()
 		// 画面共有への表示は毎回オフで始める(オンのまま忘れて次の会議でコメントが
 		// 映る事故を防ぐため、あえて永続化しない)。入力バー・音声バーは常に映らない。
+		// 例外は GAYATALK_CAPTURE 起動時で、README 等のスクリーンショットを撮れるよう
+		// 全ウィンドウ(オーバーレイ・入力バー・音声バー)を最初から映す。
 		mShareOverlay := systray.AddMenuItemCheckbox("画面共有にコメントを映す",
 			"オンにするとオーバーレイのコメントが画面共有・収録に映る(相手にも見せながら流したいとき用)。再起動でオフに戻る", false)
+		if os.Getenv("GAYATALK_CAPTURE") != "" {
+			mShareOverlay.Check()
+			overlay.SetShared(true)
+			tray.setShared(true)
+			log.Println("📸 GAYATALK_CAPTURE: 全ウィンドウを画面共有・収録・スクリーンショットに映します。")
+		}
 		go func() {
 			for range mShareOverlay.ClickedCh {
 				if mShareOverlay.Checked() {

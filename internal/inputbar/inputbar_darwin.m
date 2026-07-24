@@ -3,6 +3,7 @@
 // クラス定義はこの .m に置き、.go からは C 関数だけを呼ぶ。
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include <stdlib.h> // getenv(GAYATALK_CAPTURE)
 
 extern void inputbarGoSubmit(char *text);
 extern void inputbarGoShown(void);
@@ -80,7 +81,10 @@ static void inputbarCreate(void) {
     p.hidesOnDeactivate = NO;
     p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
         | NSWindowCollectionBehaviorFullScreenAuxiliary;
-    p.sharingType = NSWindowSharingNone; // 入力途中の文面を画面共有に映さない
+    // 入力途中の文面を画面共有に映さない。ただし GAYATALK_CAPTURE 起動時だけは
+    // スクリーンショットに映す(README 等のドキュメント撮影用。既定は安全側のまま)。
+    const char *cap = getenv("GAYATALK_CAPTURE");
+    p.sharingType = (cap && *cap) ? NSWindowSharingReadOnly : NSWindowSharingNone;
     p.releasedWhenClosed = NO;
 
     NSView *bg = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];

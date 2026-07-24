@@ -7,6 +7,7 @@
 // 解放されずリークする)。モニターが増えたぶんは表示時に追加し、減ったぶんは伏せる。
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include <stdlib.h> // getenv(GAYATALK_CAPTURE)
 
 static const CGFloat kVBW = 340, kVBH = 36;
 enum { kVBBars = 24, kVBMaxScreens = 8 };
@@ -116,7 +117,10 @@ static UTVoiceBarUnit* vbBuildUnit(void) {
     p.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces
         | NSWindowCollectionBehaviorFullScreenAuxiliary
         | NSWindowCollectionBehaviorStationary;
-    p.sharingType = NSWindowSharingNone;   // 画面共有に映さない(自分の共有画面にバーを出さない)
+    // 画面共有に映さない(自分の共有画面にバーを出さない)。GAYATALK_CAPTURE 起動時だけ
+    // 映す(README 等のドキュメント撮影用。既定は安全側のまま)。
+    const char *cap = getenv("GAYATALK_CAPTURE");
+    p.sharingType = (cap && *cap) ? NSWindowSharingReadOnly : NSWindowSharingNone;
     p.ignoresMouseEvents = YES;            // クリックは下のアプリへ素通し
     p.releasedWhenClosed = NO;
 

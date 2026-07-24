@@ -5,7 +5,8 @@
 // VoiceInk のように「いまマイクが生きている」ことを画面上で示すのが目的。
 // ピル型のバーに状態ドット(リッスン=オレンジ / 録音・音声検出=赤)とラベル、
 // 音量のミニ波形を表示する。クリックは下のアプリへ素通しし(ignoresMouseEvents)、
-// sharingType=None なので画面共有には映らない(コメントが会議相手に見えない)。
+// sharingType=None なので画面共有には映らない(コメントが会議相手に見えない。
+// 例外: GAYATALK_CAPTURE 起動時だけドキュメント撮影用に映る)。
 //
 // ObjC 実装は voicebar_darwin.m 側(inputbar と同じく、cgo preamble に ObjC
 // クラスを書くと重複シンボルになるため)。

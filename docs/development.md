@@ -13,6 +13,17 @@ make dist       # 配布用 zip(dist/gaya-talk.app.zip)
 
 Go 1.26.4+。ホットキーの権限は署名済み `.app` に紐づくため、動作確認は `go run .` ではなく `make app-open` を使う(`go run . dryrun / devices / overlay-demo / keys / version` は補助用)。設定は `~/.config/gaya-talk/config.json`(初回起動時に雛形を自動生成)。発話本文は既定でログに残さず、`GAYATALK_DEBUG=1` のときだけ出す。
 
+## ドキュメント用スクリーンショット
+
+全ウィンドウは既定で `sharingType=None` のため、画面共有だけでなくスクリーンショット・収録にも映らない。README 等の画像を撮るときは `GAYATALK_CAPTURE=1` で起動すると、オーバーレイ・入力バー・音声バーがすべて映る(メニューの「画面共有にコメントを映す」も最初からオン)。環境変数は `open` 経由では渡らないので、バンドル内のバイナリを直接起動する:
+
+```sh
+make app
+GAYATALK_CAPTURE=1 build/gaya-talk.app/Contents/MacOS/gaya-talk
+```
+
+撮り終えたらメニューから終了し、普段どおり起動し直せば既定(映らない)に戻る。
+
 ## テスト
 
 ```sh
