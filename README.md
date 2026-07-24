@@ -40,6 +40,13 @@ d="$(mktemp -d)" && curl -fL -o "$d/gaya-talk.app.zip" \
 
 1. 初回に**アクセシビリティ権限**を許可する(声も使うなら**マイク**も)
 2. メニューバーのアイコン →「**ルームに URL で参加…**」に招待 URL を貼る(再起動・アップデート後は前回のルームに自動で入り直す)
+
+   <img src="docs/images/room-menu-solo.png" width="286" alt="ルームメニュー(未参加・ソロモード)"> <img src="docs/images/room-join-dialog.png" width="450" alt="ルームに参加ダイアログ">
+
+   参加できるとメニュー先頭が 🟢「ルーム : 参加中」に変わる:
+
+   <img src="docs/images/room-menu-joined.png" width="286" alt="ルームメニュー(参加中)">
+
 3. **`右⌘`** で入力バー → 打って **Enter** で流す(バーは開いたまま連投できる。閉じるのは Esc か再度 `右⌘`)
 
    <img src="docs/images/inputbar.png" width="540" alt="画面下部に出るコメント入力バー">
