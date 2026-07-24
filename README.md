@@ -2,8 +2,7 @@
 
 # gaya-talk
 
-声もキー入力も、その場でコメントになって画面を右から左へ流れていく。
-同じルームに参加したメンバー全員のモニターに、同じコメントが流れる。
+モニターの上でコミュニケーション
 
 [![release](https://img.shields.io/github/v/release/mykstmhr/gaya-talk)](https://github.com/mykstmhr/gaya-talk/releases/latest)
 [![CI](https://github.com/mykstmhr/gaya-talk/actions/workflows/ci.yml/badge.svg)](https://github.com/mykstmhr/gaya-talk/actions/workflows/ci.yml)
