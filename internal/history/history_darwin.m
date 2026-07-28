@@ -23,6 +23,9 @@ static UTHistoryPanel *gPanel = nil;
 static NSTextView *gText = nil;
 // 表示済みコメントの整形済み行(古い順)。パネルが閉じていても積み続ける。
 static NSMutableArray<NSAttributedString *> *gEntries = nil;
+// 直近に自動配置したフレーム。次に開くとき現在フレームと比較し、違っていれば
+// 「ユーザーがドラッグで動かした」とみなしてその位置を尊重する。
+static NSRect gAutoFrame = {{0, 0}, {0, 0}};
 
 // currentScreen はいまマウスカーソルがあるモニターを返す(取れなければ mainScreen)。
 // 履歴は「見返したいと思った瞬間に作業していたモニター」に出したい(inputbar と同じ理由)。
@@ -78,6 +81,9 @@ static void historyCreate(void) {
     const char *cap = getenv("GAYATALK_CAPTURE");
     p.sharingType = (cap && *cap) ? NSWindowSharingReadOnly : NSWindowSharingNone;
     p.releasedWhenClosed = NO;
+    // ヘッダや余白をドラッグして動かせるようにする(本文の NSTextView 上は
+    // ドラッグ=テキスト選択が優先されるので、移動はヘッダ部分で行う)。
+    p.movableByWindowBackground = YES;
 
     NSView *bg = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, kHPW, kHPH)];
     bg.wantsLayer = YES;
@@ -87,14 +93,14 @@ static void historyCreate(void) {
 
     // ヘッダ: タイトルと閉じ方のヒント(パネル上端に固定)。
     NSTextField *title = [NSTextField labelWithString:@"コメント履歴"];
-    title.frame = NSMakeRect(16, kHPH - 30, 160, 18);
+    title.frame = NSMakeRect(16, kHPH - 30, 140, 18);
     title.font = [NSFont boldSystemFontOfSize:12];
     title.textColor = [NSColor colorWithWhite:1 alpha:0.92];
     title.autoresizingMask = NSViewMinYMargin;
     [bg addSubview:title];
 
-    NSTextField *hint = [NSTextField labelWithString:@"Esc で閉じる"];
-    hint.frame = NSMakeRect(kHPW - 116, kHPH - 30, 100, 18);
+    NSTextField *hint = [NSTextField labelWithString:@"ドラッグで移動 / Esc で閉じる"];
+    hint.frame = NSMakeRect(kHPW - 216, kHPH - 30, 200, 18);
     hint.font = [NSFont systemFontOfSize:11];
     hint.textColor = [NSColor colorWithWhite:1 alpha:0.4];
     hint.alignment = NSTextAlignmentRight;
@@ -219,15 +225,25 @@ void historyToggle(void) {
             [gPanel orderOut:nil];
             return;
         }
-        // 呼び出すたびに、いまカーソルがあるモニターの右端へ寄せて出す
-        // (オーバーレイが流れる中央部や、下部中央の入力バー・音声バーを塞がない)。
-        NSScreen *scr = currentScreen();
-        if (scr) {
-            NSRect sf = scr.visibleFrame; // メニューバー・Dock は避ける
-            CGFloat h = MIN(kHPH, sf.size.height - 40);
-            [gPanel setFrame:NSMakeRect(NSMaxX(sf) - kHPW - 16,
-                                        sf.origin.y + (sf.size.height - h) / 2, kHPW, h)
-                     display:NO];
+        // 位置決め: ユーザーがドラッグで動かした位置がまだ画面内にあればそこへ出す。
+        // 動かしていない(自動配置のまま)か、動かした先のモニターが外されて画面外に
+        // なった場合は、いまカーソルがあるモニターの右端へ寄せる(オーバーレイが
+        // 流れる中央部や、下部中央の入力バー・音声バーを塞がない位置)。
+        BOOL userMoved = !NSIsEmptyRect(gAutoFrame) && !NSEqualRects(gPanel.frame, gAutoFrame);
+        BOOL onScreen = NO;
+        for (NSScreen *s in [NSScreen screens]) {
+            if (NSIntersectsRect(gPanel.frame, s.visibleFrame)) { onScreen = YES; break; }
+        }
+        if (!userMoved || !onScreen) {
+            NSScreen *scr = currentScreen();
+            if (scr) {
+                NSRect sf = scr.visibleFrame; // メニューバー・Dock は避ける
+                CGFloat h = MIN(kHPH, sf.size.height - 40);
+                NSRect f = NSMakeRect(NSMaxX(sf) - kHPW - 16,
+                                      sf.origin.y + (sf.size.height - h) / 2, kHPW, h);
+                [gPanel setFrame:f display:NO];
+                gAutoFrame = f;
+            }
         }
         hpReload();
         // makeKeyAndOrderFront は非アクティブなアプリからだと画面に出ないことがある
