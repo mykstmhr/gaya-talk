@@ -107,7 +107,8 @@ func checkAndUpdate() {
 		return
 	}
 	log.Printf("⬇️ %s へアップデートします(ダウンロード後に自動で再起動)…", latest)
-	quitApp() // 後始末(専用 Ollama の停止)をしてから終了。差し替えは子プロセスが行う
+	saveHistoryHandoff() // 履歴は差し替え後の自分が引き継ぐ
+	quitApp()            // 後始末(専用 Ollama の停止)をしてから終了。差し替えは子プロセスが行う
 }
 
 // selfUpdate は README のインストールワンライナーと同じ手順を子プロセスで実行する。

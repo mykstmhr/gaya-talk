@@ -22,6 +22,10 @@ type Config struct {
 	// InputHotkey は文字入力バーを出すキー(主入力)。ルーム未参加のソロモードでも
 	// 使うためトップレベルに置く。音声トリガの voice.hotkey とは別のキーにすること。
 	InputHotkey Hotkey `json:"input_hotkey"`
+	// HistoryHotkey はコメント履歴パネル(流れて消えたコメントを見返す)を出すキー。
+	// 履歴はメモリ内の直近 100 件だけ(「再起動」・アップデートでは引き継ぎ、
+	// 「終了」で消える)。他のキーと別にすること。
+	HistoryHotkey Hotkey `json:"history_hotkey"`
 	// Sound は効果音(文字入力バーの開閉・音声リッスンの開始/停止)。
 	Sound SoundConfig `json:"sound"`
 	// Voice は音声入力(マイク→文字起こし)の設定一式。使わない人は voice.input:"off"
@@ -195,7 +199,10 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Room:        RoomConfig{},
 		InputHotkey: Hotkey{Key: "rightcmd"},
-		Sound:       SoundConfig{Enabled: true, InputOpen: "Pop", InputClose: "Bottle", On: "Submarine", Off: "Bottle"},
+		// 音声(右⇧+右⌘)と同じ「右⇧を押しながら」の系列に揃える。左⌥単体などは
+		// 通常のショートカット入力(⌥+キー)でも発火してしまうため既定にしない。
+		HistoryHotkey: Hotkey{Mods: []string{"rightshift"}, Key: "leftcmd"},
+		Sound:         SoundConfig{Enabled: true, InputOpen: "Pop", InputClose: "Bottle", On: "Submarine", Off: "Bottle"},
 		Voice: VoiceConfig{
 			Input:         VoiceAuto,
 			Hotkey:        Hotkey{Mods: []string{"rightshift"}, Key: "rightcmd"},

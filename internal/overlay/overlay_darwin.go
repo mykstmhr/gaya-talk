@@ -13,9 +13,9 @@
 // 追従しないと、外したモニターのウィンドウを macOS が残りの画面へ移動させ、
 // 同じコメントが二重に流れてしまう。
 //
-// Option を押しながら流れているコメントをクリックすると本文をコピーできる。
-// ウィンドウはクリック貫通のまま(貫通をやめると画面全体のクリックを吸って
-// 下のアプリが操作不能になる)、listen-only のグローバルモニタで座標だけ拾う。
+// 本文のコピーはコメント履歴パネル(internal/history)から行う(かつてあった
+// ⌥+クリックのコピーは、流れている数秒しか使えないうえグローバルのクリック監視が
+// 要るため、履歴パネルの追加を機に廃止した)。
 package overlay
 
 /*
@@ -110,49 +110,6 @@ static void overlaySetShared(int on) {
 	});
 }
 
-// overlayCopyAt はスクリーン座標 pt(Cocoa の bottom-left 原点)に流れている
-// コメントを探し、見つかれば本文(layer.name に持たせてある)をクリップボードへ
-// コピーする。アニメーション中の実位置はモデル値ではなく presentationLayer が持つ。
-static void overlayCopyAt(NSPoint pt) {
-	for (NSWindow *win in gWins) {
-		if (!win.isVisible || !NSPointInRect(pt, win.frame)) continue;
-		CGPoint p = CGPointMake(pt.x - win.frame.origin.x, pt.y - win.frame.origin.y);
-		for (CALayer *layer in win.contentView.layer.sublayers) {
-			if (layer.name.length == 0) continue;
-			CALayer *pres = layer.presentationLayer ?: layer;
-			// コメントは動いているぶんクリックがずれやすいので、当たり判定を
-			// 左右に少し広げる(kGap=48 の範囲内なら隣のコメントと重ならない)。
-			if (!CGRectContainsPoint(CGRectInset(pres.frame, -20, 0), p)) continue;
-			NSPasteboard *pb = [NSPasteboard generalPasteboard];
-			[pb clearContents];
-			[pb setString:layer.name forType:NSPasteboardTypeString];
-			// コピーできたことは当のコメントの明滅で伝える(トーストを別に
-			// 流すと本物のコメントに紛れて紛らわしい)。
-			CABasicAnimation *f = [CABasicAnimation animationWithKeyPath:@"opacity"];
-			f.fromValue = @(0.15);
-			f.toValue = @(1.0);
-			f.duration = 0.4;
-			[layer addAnimation:f forKey:@"copied"];
-			return;
-		}
-	}
-}
-
-// overlayInstallClickMonitor は Option+クリックの検出を仕込む。listen-only なので
-// クリック自体は下のアプリへそのまま届き、操作を邪魔しない。素のクリックに
-// 反応させないのは、会議中の普通のクリックでクリップボードを潰さないため。
-// 自プロセスのウィンドウはクリック貫通なので、グローバルモニタ側に必ず届く。
-static void overlayInstallClickMonitor(void) {
-	static id gClickMon = nil;
-	if (gClickMon) return;
-	gClickMon = [[NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
-		handler:^(NSEvent *e) {
-			if ((e.modifierFlags & NSEventModifierFlagOption) == 0) return;
-			overlayCopyAt([NSEvent mouseLocation]);
-		}] retain]; // ARC なし: retain しないと autorelease されて監視が止まる
-	(void)gClickMon;
-}
-
 static void overlayStart(void) {
 	dispatch_async(dispatch_get_main_queue(), ^{
 		if (gWins) return;
@@ -160,7 +117,6 @@ static void overlayStart(void) {
 		// を static に置いてはいけない(プール解放後にダングリングする)。alloc で所有する。
 		gWins = [[NSMutableArray alloc] init];
 		overlaySync();
-		overlayInstallClickMonitor();
 		// モニターの抜き差し・解像度変更に追従する。トークンは retain して持ち続ける
 		// (ARC なしなので、放置すると autorelease されて観測が止まりうる)。
 		static id gScreenObs = nil;
@@ -247,7 +203,6 @@ static void overlayShow(const char *utf8, double r, double g, double b) {
 			CFTimeInterval dur = (W + sz.width) / kSpeed;
 
 			CALayer *layer = [CALayer layer];
-			layer.name = text; // Option+クリックでコピーする本文(name は copy 属性)
 			layer.bounds = CGRectMake(0, 0, sz.width, sz.height);
 			layer.contents = (__bridge id)rep.CGImage;
 			layer.contentsScale = scale;
@@ -288,7 +243,6 @@ import (
 // Start は透過オーバーレイウィンドウを接続中の全モニターに作り、以後の
 // モニターの抜き差しにも追従する。二重呼び出しは無害。
 // AppKit のメインループ(systray.Run)が動いていることが前提。
-// 流れているコメントは Option+クリックで本文をコピーできる。
 func Start() {
 	C.overlayStart()
 }

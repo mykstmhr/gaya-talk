@@ -16,6 +16,7 @@ import (
 	"github.com/mykstmhr/gaya-talk/internal/adminstore"
 	"github.com/mykstmhr/gaya-talk/internal/config"
 	"github.com/mykstmhr/gaya-talk/internal/dialog"
+	"github.com/mykstmhr/gaya-talk/internal/history"
 	"github.com/mykstmhr/gaya-talk/internal/inputbar"
 	"github.com/mykstmhr/gaya-talk/internal/mirror"
 	"github.com/mykstmhr/gaya-talk/internal/namestore"
@@ -119,6 +120,15 @@ func setupRoom(cfg *config.Config) {
 	}
 	overlay.Start()
 
+	// 再起動・アップデートの直前に書き出された履歴があれば復元する(読んだら即削除)。
+	// maxAge は再起動をまたぐ時間の上限。アップデートはダウンロード後に再起動する
+	// ので、遅い回線でも取りこぼさないよう長めに取る。
+	if p, err := history.HandoffPath(); err == nil {
+		if n := history.LoadHandoff(p, 10*time.Minute); n > 0 {
+			log.Printf("↩️ 再起動前のコメント履歴 %d 件を引き継ぎました。", n)
+		}
+	}
+
 	roomClient.OnMessage = displayComment
 	roomClient.OnState = func(s room.State) { setRoomState(s) }
 	// 無効化・失効で再接続できないときは理由をオーバーレイにも出す(ログだけだと気づけない)。
@@ -141,6 +151,17 @@ func setupRoom(cfg *config.Config) {
 					log.Println("inputbar: ホットキー検知 → Toggle 呼び出し")
 				}
 				inputbar.Toggle()
+			}
+		}()
+	}
+
+	// コメント履歴パネル: 流れて消えたコメントを後から見返す(このプロセスのメモリ内のみ)。
+	if down, err := watchDown(cfg.HistoryHotkey); err != nil {
+		log.Printf("⚠️ コメント履歴のホットキー(%s)を登録できません: %v", cfg.HistoryHotkey, err)
+	} else {
+		go func() {
+			for range down {
+				history.Toggle()
 			}
 		}()
 	}
@@ -414,6 +435,7 @@ func displayComment(p room.Payload) {
 		text = "[" + p.Name + "] " + text
 	}
 	overlay.Show(text, p.Color)
+	history.Append(p.Name, p.Text, p.Color, p.SentAt)
 	mirrorToSlack(text)
 }
 

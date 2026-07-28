@@ -35,6 +35,7 @@ import (
 	"github.com/mykstmhr/gaya-talk/internal/config"
 	"github.com/mykstmhr/gaya-talk/internal/dialog"
 	"github.com/mykstmhr/gaya-talk/internal/enhance"
+	"github.com/mykstmhr/gaya-talk/internal/history"
 	"github.com/mykstmhr/gaya-talk/internal/inputbar"
 	"github.com/mykstmhr/gaya-talk/internal/modkey"
 	"github.com/mykstmhr/gaya-talk/internal/overlay"
@@ -109,7 +110,20 @@ func restartApp() {
 		return
 	}
 	log.Println("再起動します…")
+	saveHistoryHandoff() // 履歴は次の自分が引き継ぐ(通常の「終了」では引き継がない)
 	quitApp()
+}
+
+// saveHistoryHandoff は再起動・アップデートの直前にコメント履歴を書き出す
+// (次回起動が読み込んで即削除する)。失敗しても再起動は止めない。
+func saveHistoryHandoff() {
+	p, err := history.HandoffPath()
+	if err != nil {
+		return
+	}
+	if err := history.SaveHandoff(p); err != nil {
+		log.Printf("コメント履歴の引き継ぎ保存に失敗(再起動後は空になります): %v", err)
+	}
 }
 
 // warnIfTranslocated は Gatekeeper の App Translocation(パスランダム化)下で
@@ -302,10 +316,10 @@ var lockFile *os.File
 // メニュー下部の「操作方法」ブロック(ヘッダ + 字下げした操作 1 つにつき 1 行)。
 // 状態(待機/聞き取り…)はメニューには出さず、アイコン色・画面下部のバー・ツールチップが担う。
 var (
-	mInfoOps   *systray.MenuItem // ヘッダ「操作方法」
-	mInfoInput *systray.MenuItem // 文字入力のキー
-	mInfoVoice *systray.MenuItem // 音声入力のキー(音声オフ設定なら出さない)
-	mInfoCopy  *systray.MenuItem // コメントコピーの操作
+	mInfoOps     *systray.MenuItem // ヘッダ「操作方法」
+	mInfoInput   *systray.MenuItem // 文字入力のキー
+	mInfoVoice   *systray.MenuItem // 音声入力のキー(音声オフ設定なら出さない)
+	mInfoHistory *systray.MenuItem // コメント履歴のキー
 )
 
 // enhancer は文字起こし結果のローカル LLM 整形(無効なら素通し)。serve で初期化する。
@@ -357,7 +371,7 @@ func onReady(dryRun bool) func() {
 		mInfoOps = newInfoItem()
 		mInfoInput = newInfoItem()
 		mInfoVoice = newInfoItem()
-		mInfoCopy = newInfoItem()
+		mInfoHistory = newInfoItem()
 		// 何が起動しているか(バージョン・リリース版/ローカルビルド)を常に見えるように。
 		addVersionMenuItems()
 		addNameMenuItem()
@@ -365,6 +379,15 @@ func onReady(dryRun bool) func() {
 		go func() {
 			for range mOpenConfig.ClickedCh {
 				openConfigFile()
+			}
+		}()
+		// コメント履歴はホットキー(history_hotkey)が主だが、キーを覚えていなくても
+		// 開けるようメニューにも出す。パネルは自分にだけ見え、画面共有には映らない。
+		mHistory := systray.AddMenuItem("コメント履歴を表示",
+			"流れて消えたコメントを見返すパネルを開閉する(この Mac のメモリ内・直近 100 件。画面共有には映らない)")
+		go func() {
+			for range mHistory.ClickedCh {
+				history.Toggle()
 			}
 		}()
 		// 画面共有への表示は毎回オフで始める(オンのまま忘れて次の会議でコメントが
@@ -820,7 +843,7 @@ func updateKeyInfo(cfg *config.Config) {
 	default:
 		setInfo(mInfoVoice, "　音声入力 : "+prettyHotkey(cfg.Voice.Hotkey))
 	}
-	setInfo(mInfoCopy, "　コメントコピー : ⌥+コメントをクリック")
+	setInfo(mInfoHistory, "　コメント履歴 : "+prettyHotkey(cfg.HistoryHotkey))
 }
 
 // prettyHotkey はホットキーをメニュー表示用の記号(右⌘ 等)に変換する。
