@@ -19,6 +19,17 @@ BUILD_KIND ?= local
 # -extldflags は cgo の -lobjc 重複によるリンカ警告(無害)の抑止。
 LDFLAGS := -ldflags "-X main.version=$(BUILD_VERSION) -X main.buildKind=$(BUILD_KIND) -extldflags=-Wl,-no_warn_duplicate_libraries"
 
+# 配布バイナリが動く最小 macOS(Info.plist の LSMinimumSystemVersion と揃える)。
+# 明示しないとリンカがビルドマシンの OS バージョンを最小要件としてバイナリに埋め込み、
+# それより古い macOS では「アップデートが必要」と起動を拒否される(CI の macos-latest が
+# macOS 26 になったことで実際に発生した)。
+# -Werror=unguarded-availability-new は MACOS_MIN より新しい API を @available ガード
+# なしで使うとビルドエラーにする(古い OS での実行時クラッシュをコンパイル時に検出する)。
+# -g -O2 は cgo の既定値(環境変数で上書きすると既定が消えるため書き戻す)。
+MACOS_MIN := 13.0
+export CGO_CFLAGS := -g -O2 -mmacosx-version-min=$(MACOS_MIN) -Werror=unguarded-availability-new
+export CGO_LDFLAGS := -mmacosx-version-min=$(MACOS_MIN)
+
 APP := build/gaya-talk.app
 
 # whisper モデルの取得先・置き場。config の whisper.model もここを指す。

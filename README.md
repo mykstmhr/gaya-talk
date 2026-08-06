@@ -6,7 +6,7 @@
 
 [![release](https://img.shields.io/github/v/release/mykstmhr/gaya-talk)](https://github.com/mykstmhr/gaya-talk/releases/latest)
 [![CI](https://github.com/mykstmhr/gaya-talk/actions/workflows/ci.yml/badge.svg)](https://github.com/mykstmhr/gaya-talk/actions/workflows/ci.yml)
-![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-black)
+![macOS](https://img.shields.io/badge/macOS%2013%2B-Apple%20Silicon-black)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 [ホストガイド](docs/hosting.md) · [開発者ガイド](docs/development.md)

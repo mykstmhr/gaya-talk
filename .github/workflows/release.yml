@@ -51,13 +51,23 @@ jobs:
         # BUILD_VERSION はタグ(shallow checkout では git describe が使えない)。
         # BUILD_KIND=release でメニューに「リリース版」と出し、自己アップデートを有効にする。
         run: make dist SIGN_IDENTITY=gaya-talk-dist BUILD_VERSION="$GITHUB_REF_NAME" BUILD_KIND=release
+      - name: バイナリの最小 macOS を検証
+        # Makefile の -mmacosx-version-min が外れると、ランナーの OS バージョンが
+        # 最小要件になり、古い macOS で「アップデートが必要」と起動を拒否される
+        # (macos-latest が macOS 26 になった際に実際に起きた)。再発をここで止める。
+        run: |
+          minos=$(otool -l build/gaya-talk.app/Contents/MacOS/gaya-talk | awk '/minos/{print $2; exit}')
+          if [ "$minos" != "13.0" ]; then
+            echo "最小 macOS が 13.0 ではありません: $minos" >&2
+            exit 1
+          fi
       - name: Release を作成して zip を添付
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           files: dist/gaya-talk.app.zip
           generate_release_notes: true
           body: |
-            macOS (Apple Silicon) 用です。**ターミナルで 1 コマンドが簡単**(`gh` 経由なら Gatekeeper の警告が出ません。アップデートも同じコマンド):
+            macOS 13 (Ventura) 以降・Apple Silicon 用です。**ターミナルで 1 コマンドが簡単**(`gh` 経由なら Gatekeeper の警告が出ません。アップデートも同じコマンド):
 
             ```sh
             d="$(mktemp -d)" && gh release download --repo mykstmhr/gaya-talk --pattern gaya-talk.app.zip --dir "$d" \
